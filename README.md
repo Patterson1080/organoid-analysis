@@ -1,6 +1,6 @@
 # Brain Organoid Analysis
 
-A minimalist, data-driven web application for visualizing brain organoid neuron locations and spike activity. Inspired by the aesthetic sensibilities of Ryoji Ikeda and Refik Anadol.
+A minimalist, data-driven web application for visualizing and streaming brain organoid neuron locations and spike activity.
 
 ## Features
 
