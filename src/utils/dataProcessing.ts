@@ -61,6 +61,8 @@ export const parseNeuronCSV = (file: File): Promise<Neuron[]> => {
                                     x: Number(row[xCol!]),
                                     y: Number(row[yCol!]),
                                     is_backbone: isBackbone,
+                                    xy_norm_0: row['xy_norm_0'] !== undefined ? Number(row['xy_norm_0']) : Number(row[xCol!]),
+                                    xy_norm_1: row['xy_norm_1'] !== undefined ? Number(row['xy_norm_1']) : Number(row[yCol!])
                                 };
                             })
                             .filter(n => n !== null) as Neuron[];

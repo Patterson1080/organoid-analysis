@@ -259,28 +259,7 @@ header {
     }
 }
 
-/* Scanline Animation */
-@keyframes scanline {
-    0% {
-        transform: translateY(-100%);
-    }
-
-    100% {
-        transform: translateY(100vh);
-    }
-}
-
-.scanline {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 2px;
-    background: rgba(255, 255, 255, 0.1);
-    animation: scanline 8s linear infinite;
-    pointer-events: none;
-    z-index: 9999;
-}
+/* Scanline removed */
 
 /* Transparent Background Mode for Spout/OBS Capture */
 .transparent-bg {

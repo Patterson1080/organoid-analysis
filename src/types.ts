@@ -5,6 +5,9 @@ export interface Neuron {
     x: number;
     y: number;
     is_backbone: boolean;
+    xy_norm_0: number; // For hypergraph calculation
+    xy_norm_1: number; // For hypergraph calculation
+    z?: number; // Optional Z for 3D mapping
 }
 
 export interface SpikeEvent {

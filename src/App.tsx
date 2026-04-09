@@ -8,6 +8,9 @@ import { Organoid3D } from './components/Organoid3D';
 import { SpikeActivityGraphs } from './components/SpikeActivityGraphs';
 import { RealTimeGraph } from './components/RealTimeGraph';
 import PCA3D from './components/PCA3D';
+import { HypergraphsPanel } from './components/HypergraphsPanel';
+import { CircularEventGraph } from './components/CircularEventGraph';
+
 import { Neuron, SpikeEvent } from './types';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
 
@@ -49,6 +52,10 @@ function App() {
     const [showSpikeAnalysis, setShowSpikeAnalysis] = useState(false);
     const [showPCA, setShowPCA] = useState(false);
     const [showRealTimeGraph, setShowRealTimeGraph] = useState(false);
+    const [showHypergraphs, setShowHypergraphs] = useState(false);
+    const [showCircularGraph, setShowCircularGraph] = useState(false);
+    const [showRegionsGraph, setShowRegionsGraph] = useState(false);
+
 
     const allSpikesRef = useRef<SpikeEvent[]>([]);
 
@@ -322,70 +329,125 @@ function App() {
         setIsExporting(true);
         setExportProgress(0);
 
-        const zip = new JSZip();
-        const folder = zip.folder("organoid_sequence");
-
-        // Export settings
-        // Calculate total frames based on Target Playback Duration (s) * 60 FPS
-        // If targetDuration is not set (0), fallback to real-time (Data Duration * 60 FPS)
-        const dataDurationSec = (endTime - startTime) / 1000;
-        const duration = targetDuration > 0 ? targetDuration : dataDurationSec;
-        const totalFrames = Math.ceil(duration * 60);
-
-        const start = startTime;
-        const end = endTime;
-        const totalDataDuration = end - start;
-
-        // Step size in data-time (ms) to achieve 60 FPS over the target duration
-        const STEP_MS = totalDataDuration / totalFrames;
-
-        console.log(`Exporting: ${totalFrames} frames over ${duration}s. Step: ${STEP_MS.toFixed(4)}ms`);
-
-        let currentStep = 0;
-
-        // Helper to wait for frame render
-        // Reduced wait time for faster export, but enough for React/Three to update
-        const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-        // Use a loop that counts frames to ensure exact frame count
-        for (let i = 0; i < totalFrames; i++) {
-            const t = start + (i * STEP_MS);
-
-            if (t > end) break;
-
-            setPlaybackTime(t);
-            playbackTimeRef.current = t;
-
-            // Wait for React/Three to update
-            // 30ms is a safe buffer (approx 2 frames at 60Hz) to ensure render completes
-            await wait(30);
-
-            // Try PNG first (Organoid3D), fallback to SVG if not available
-            if (exportRef.current.getPNGDataURL) {
-                const dataUrl = exportRef.current.getPNGDataURL();
-                // Remove header "data:image/png;base64,"
-                const base64Data = dataUrl.replace(/^data:image\/png;base64,/, "");
-                folder?.file(`frame_${i.toString().padStart(6, '0')}.png`, base64Data, { base64: true });
-            } else if (exportRef.current.getSVGString) {
-                const svgString = exportRef.current.getSVGString();
-                if (svgString) {
-                    folder?.file(`frame_${i.toString().padStart(6, '0')}.svg`, svgString);
+        try {
+            let dirHandle: any = null;
+            if ('showDirectoryPicker' in window) {
+                try {
+                    // @ts-ignore
+                    dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                } catch (e) {
+                    // User aborted directory picker
+                    console.log('Directory picker cancelled');
+                    setIsExporting(false);
+                    return;
                 }
             }
 
-            currentStep++;
-            setExportProgress(Math.round((currentStep / totalFrames) * 100));
+            const zip = dirHandle ? null : new JSZip();
+            const folder = zip ? zip.folder("organoid_sequence") : null;
+
+            // Export settings
+            // Calculate total frames based on Target Playback Duration (s) * 60 FPS
+            // If targetDuration is not set (0), fallback to real-time (Data Duration * 60 FPS)
+            const dataDurationSec = (endTime - startTime) / 1000;
+            const duration = targetDuration > 0 ? targetDuration : dataDurationSec;
+            const totalFrames = Math.ceil(duration * 60);
+
+            const start = startTime;
+            const end = endTime;
+            const totalDataDuration = end - start;
+
+            // Step size in data-time (ms) to achieve 60 FPS over the target duration
+            const STEP_MS = totalDataDuration / totalFrames;
+
+            console.log(`Exporting: ${totalFrames} frames over ${duration}s. Step: ${STEP_MS.toFixed(4)}ms`);
+
+            let currentStep = 0;
+
+            // Helper to wait for frame render
+            // Reduced wait time for faster export, but enough for React/Three to update
+            const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+            const ext = exportRef.current.getPNGDataURL ? "png" : "svg";
+
+            // Use a loop that counts frames to ensure exact frame count
+            for (let i = 0; i < totalFrames; i++) {
+                const t = start + (i * STEP_MS);
+
+                if (t > end) break;
+
+                setPlaybackTime(t);
+                playbackTimeRef.current = t;
+
+                // Wait for React/Three to update
+                // 30ms is a safe buffer (approx 2 frames at 60Hz) to ensure render completes
+                await wait(30);
+
+                const fileName = `frame_${i.toString().padStart(6, '0')}.${ext}`;
+                let finalBlob: Blob | null = null;
+                let finalString: string | null = null;
+                let isBase64 = false;
+
+                // Try PNG first (Organoid3D), fallback to SVG if not available
+                if (exportRef.current.getPNGDataURL) {
+                    const dataUrl = exportRef.current.getPNGDataURL();
+                    const base64Data = dataUrl.replace(/^data:image\/png;base64,/, "");
+                    
+                    if (dirHandle) {
+                        // Direct disk write requires converting base64 back to Blob
+                        const res = await fetch(dataUrl);
+                        finalBlob = await res.blob();
+                    } else {
+                        finalString = base64Data;
+                        isBase64 = true;
+                    }
+                } else if (exportRef.current.getSVGString) {
+                    const svgString = exportRef.current.getSVGString();
+                    if (svgString) {
+                        if (dirHandle) {
+                            finalBlob = new Blob([svgString], { type: 'image/svg+xml' });
+                        } else {
+                            finalString = svgString;
+                        }
+                    }
+                }
+
+                if (dirHandle && finalBlob) {
+                    const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(finalBlob);
+                    await writable.close();
+                } else if (folder && finalString) {
+                    if (isBase64) {
+                        folder.file(fileName, finalString, { base64: true });
+                    } else {
+                        folder.file(fileName, finalString);
+                    }
+                }
+
+                currentStep++;
+                if (currentStep % 5 === 0) {
+                    setExportProgress(Math.round((currentStep / totalFrames) * 100));
+                }
+            }
+
+            // Generate ZIP if fallback was used
+            if (zip) {
+                const content = await zip.generateAsync({ type: "blob" });
+                saveAs(content, `organoid_sequence_${ext}.zip`);
+            } else {
+                alert('Success! Sequence export completed directly to the selected folder.');
+            }
+
+        } catch (err) {
+            console.error("Export sequence failed", err);
+            alert("Export sequence failed. Disk may be full or permission denied.");
+        } finally {
+            setIsExporting(false);
+            setExportProgress(0);
+            setPlaybackTime(startTime); // Reset to start
+            playbackTimeRef.current = startTime;
         }
-
-        // Generate ZIP
-        const content = await zip.generateAsync({ type: "blob" });
-        const ext = exportRef.current.getPNGDataURL ? "png" : "svg";
-        saveAs(content, `organoid_sequence_${ext}.zip`);
-
-        setIsExporting(false);
-        setExportProgress(0);
-        setPlaybackTime(startTime); // Reset to start
-        playbackTimeRef.current = startTime;
     };
 
     // Keyboard Shortcuts for Frame Stepping
@@ -578,7 +640,6 @@ function App() {
 
     return (
         <div className={`app-container ${isTransparent ? 'transparent-bg' : ''}`}>
-            <div className="scanline" />
             <div className="container">
                 <header>
                     <div className="flex justify-between items-center">
@@ -677,80 +738,66 @@ function App() {
                                 </div>
 
                                 {/* Playback Controls */}
-                                <div className="flex flex-col gap-0" style={{ marginTop: 'var(--space-lg)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-md)' }}>
-                                    {/* Row 1: Transport */}
-                                    <div className="flex gap-sm">
-                                        <button className="btn" style={{ padding: '4px 8px', minWidth: '30px' }} onClick={() => { setIsPlaying(false); setPlaybackTime(Math.max(startTime, playbackTime - 10)); }}>
-                                            &lt;
-                                        </button>
-                                        <button className="btn" style={{ minWidth: '80px' }} onClick={() => setIsPlaying(!isPlaying)}>
-                                            {isPlaying ? '❚❚ Pause' : '▶ Play'}
-                                        </button>
-                                        <button className="btn" style={{ padding: '4px 8px', minWidth: '30px' }} onClick={() => { setIsPlaying(false); setPlaybackTime(Math.min(endTime, playbackTime + 10)); }}>
-                                            &gt;
-                                        </button>
-                                        <button className="btn" onClick={() => { setIsPlaying(false); setPlaybackTime(startTime); }}>
-                                            ■ Stop
-                                        </button>
+                                {/* Playback Controls — grid + timestamp below, full-width to match inputs */}
+                                <div style={{ marginTop: 'var(--space-lg)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-md)' }}>
+                                    {(() => {
+                                        const cell: React.CSSProperties = {
+                                            fontFamily: 'var(--font-mono)',
+                                            fontSize: '11px',
+                                            letterSpacing: '0.08em',
+                                            padding: '6px 10px',
+                                            textAlign: 'center',
+                                            background: 'transparent',
+                                            border: 'none',
+                                            color: 'var(--color-text-primary)',
+                                            cursor: 'pointer',
+                                            width: '100%',
+                                            display: 'block',
+                                        };
+                                        const cellActive: React.CSSProperties = { ...cell, background: '#fff', color: '#000' };
+                                        const bd = '1px solid var(--color-border)';
+                                        const C = (col: number, row: number, content: React.ReactNode) => (
+                                            <div key={`${row}-${col}`} style={{
+                                                borderRight:  col < 4 ? bd : undefined,
+                                                borderBottom: row < 2 ? bd : undefined,
+                                                display: 'flex', alignItems: 'stretch',
+                                            }}>
+                                                {content}
+                                            </div>
+                                        );
+                                        return (
+                                            <>
+                                                {/* 4×2 button grid — full width */}
+                                                <div style={{
+                                                    display: 'grid',
+                                                    gridTemplateColumns: 'repeat(4, 1fr)',
+                                                    gridTemplateRows: 'repeat(2, auto)',
+                                                    border: bd,
+                                                    width: '100%',
+                                                }}>
+                                                    {C(1,1, <button style={cell} onClick={() => { setIsPlaying(false); setPlaybackTime(Math.max(startTime, playbackTime - 10)); }}>&lt;</button>)}
+                                                    {C(2,1, <button style={cell} onClick={() => setIsPlaying(!isPlaying)}>{isPlaying ? '|| PAUSE' : '> PLAY'}</button>)}
+                                                    {C(3,1, <button style={cell} onClick={() => { setIsPlaying(false); setPlaybackTime(startTime); }}>[] STOP</button>)}
+                                                    {C(4,1, <button style={cell} onClick={() => { setIsPlaying(false); setPlaybackTime(Math.min(endTime, playbackTime + 10)); }}>&gt;</button>)}
+                                                    {C(1,2, <button style={isLooping   ? cellActive : cell} onClick={() => setIsLooping(!isLooping)}>{isLooping ? '[*] LOOP' : '[ ] LOOP'}</button>)}
+                                                    {C(2,2, <button style={soundEnabled ? cellActive : cell} onClick={() => setSoundEnabled(!soundEnabled)}>{soundEnabled ? '[+] SOUND' : '[-] SOUND'}</button>)}
+                                                    {C(3,2, <button style={isReverse   ? cellActive : cell} onClick={() => setIsReverse(!isReverse)}>&lt; REVERSE</button>)}
+                                                    {C(4,2, <button style={spoutEnabled ? cellActive : cell} onClick={() => setSpoutEnabled(!spoutEnabled)}>{spoutEnabled ? '[*] SPOUT' : '[ ] SPOUT'}</button>)}
+                                                </div>
 
-                                        <div className="status-text" style={{ marginLeft: 'auto', alignSelf: 'center' }}>
-                                            T: {Math.round(playbackTime)} ms
-                                        </div>
-                                    </div>
-
-                                    {/* Row 2: Options (Loop, Sound, Reverse) - Touching upper row */}
-                                    <div className="flex gap-sm" style={{ marginTop: '-1px' }}>
-                                        <button
-                                            className="btn"
-                                            onClick={() => setIsLooping(!isLooping)}
-                                            style={{
-                                                backgroundColor: isLooping ? '#fff' : 'transparent',
-                                                color: isLooping ? '#000' : 'var(--color-text-primary)',
-                                                fontSize: '0.8em',
-                                                padding: '2px 8px',
-                                                borderTopLeftRadius: 0,
-                                                borderTopRightRadius: 0
-                                            }}
-                                        >
-                                            🔁 Loop
-                                        </button>
-                                        <button
-                                            className="btn"
-                                            onClick={() => setSoundEnabled(!soundEnabled)}
-                                            style={{
-                                                backgroundColor: soundEnabled ? '#fff' : 'transparent',
-                                                color: soundEnabled ? '#000' : 'var(--color-text-primary)',
-                                                fontSize: '0.8em',
-                                                padding: '2px 8px',
-                                                borderTopLeftRadius: 0,
-                                                borderTopRightRadius: 0
-                                            }}
-                                        >
-                                            {soundEnabled ? '🔊 Sound On' : '🔇 Sound Off'}
-                                        </button>
-                                        <button
-                                            className="btn"
-                                            onClick={() => setIsReverse(!isReverse)}
-                                            style={{
-                                                color: isReverse ? 'var(--color-accent)' : 'var(--color-text)',
-                                                borderColor: isReverse ? 'var(--color-accent)' : 'var(--color-border)',
-                                                fontSize: '0.9rem',
-                                                padding: '4px 12px'
-                                            }}
-                                        >
-                                            ◀ Reverse
-                                        </button>
-                                        <button
-                                            className="btn"
-                                            onClick={() => setSpoutEnabled(!spoutEnabled)}
-                                            style={{
-                                                borderColor: spoutEnabled ? 'var(--color-accent)' : 'var(--color-border)',
-                                                color: spoutEnabled ? 'var(--color-accent)' : 'var(--color-text)'
-                                            }}
-                                        >
-                                            {spoutEnabled ? 'Spout ON' : 'Spout OFF'}
-                                        </button>
-                                    </div>
+                                                {/* Timestamp below the grid, left-aligned, no box */}
+                                                <div style={{
+                                                    fontFamily: 'var(--font-mono)',
+                                                    fontSize: '11px',
+                                                    letterSpacing: '0.06em',
+                                                    color: 'var(--color-text-primary)',
+                                                    padding: '5px 2px 0',
+                                                }}>
+                                                    T: {Math.round(playbackTime)} MS
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
 
                                 {/* Playback Speed Control (Target Duration) */}
@@ -814,6 +861,31 @@ function App() {
                                         {showRealTimeGraph ? '■ Hide' : '▶'} REAL-TIME GRAPH
                                     </button>
                                 )}
+                                {allSpikesRef.current.length > 0 && (
+                                    <button
+                                        className={`btn ${showHypergraphs ? 'active' : ''}`}
+                                        onClick={() => setShowHypergraphs(!showHypergraphs)}
+                                    >
+                                        {showHypergraphs ? '■ Hide' : '▶'} Hypergraphs
+                                    </button>
+                                )}
+                                {allSpikesRef.current.length > 0 && (
+                                    <button
+                                        className={`btn ${showCircularGraph ? 'active' : ''}`}
+                                        onClick={() => setShowCircularGraph(!showCircularGraph)}
+                                    >
+                                        {showCircularGraph ? '■ Hide' : '▶'} CIRCULAR TOPOLOGY
+                                    </button>
+                                )}
+                                {allSpikesRef.current.length > 0 && (
+                                    <button
+                                        className={`btn ${showRegionsGraph ? 'active' : ''}`}
+                                        onClick={() => setShowRegionsGraph(!showRegionsGraph)}
+                                    >
+                                        {showRegionsGraph ? '■ Hide' : '▶'} NEURAL REGIONS
+                                    </button>
+                                )}
+
                             </div>
 
                             <div className="flex flex-col gap-sm" style={{ marginTop: 'var(--space-md)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-md)' }}>
@@ -1073,7 +1145,52 @@ function App() {
                         </div>
                     )}
 
-                    {!showOrganoid && !showSpikeAnalysis && !showPCA && !showRealTimeGraph && (
+                    {showHypergraphs && allSpikesRef.current.length > 0 && (
+                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                            <HypergraphsPanel
+                                spikes={allSpikesRef.current}
+                                neurons={neurons}
+                                currentTime={playbackTime}
+                                isPlaying={isPlaying}
+                            />
+                        </div>
+                    )}
+
+                    {showCircularGraph && allSpikesRef.current.length > 0 && (
+                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                            <CircularEventGraph
+                                spikes={allSpikesRef.current}
+                                neurons={neurons}
+                                currentTime={playbackTime}
+                                width={1200}
+                                height={1200}
+                                exportResolution={2048}
+                                targetDuration={targetDuration}
+                                mode="topology"
+                                showZoomWindow={true}
+                            />
+                        </div>
+                    )}
+
+                    {showRegionsGraph && allSpikesRef.current.length > 0 && (
+                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                            <CircularEventGraph
+                                spikes={allSpikesRef.current}
+                                neurons={neurons}
+                                currentTime={playbackTime}
+                                width={1200}
+                                height={1200}
+                                exportResolution={2048}
+                                targetDuration={targetDuration}
+                                mode="regions"
+                                showZoomWindow={true}
+                                title="Neural_Regions_V1.0"
+                            />
+                        </div>
+                    )}
+
+
+                    {!showOrganoid && !showSpikeAnalysis && !showPCA && !showRealTimeGraph && !showHypergraphs && (
                         <div className="grid-cell" style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <div className="status-text" style={{ opacity: 0.5 }}>
                                 WAITING FOR DATA INPUT...

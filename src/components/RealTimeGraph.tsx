@@ -34,11 +34,19 @@ const drawGraphFrame = (
     mode: GraphMode,
     focusData: FocusData | null,
     timestamp: number,
-    modeTimer: number,
-    enableStrobe: boolean
+    modeTimer: number
 ) => {
-    // Helper: Random integer
     const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1) + min);
+
+    // Scale timeline window based on width to prevent stretching on large exports
+    const timeScale = width >= 7680 ? (width / 7680) : 1;
+    const mainTimeWindow = 10000 * timeScale;
+    const zoomWindowDur = 500 * timeScale;
+    
+    // Scale down fonts by 40% for high-res exports (width > 2000)
+    const fontPrimary = width > 2000 ? '16px monospace' : '7px monospace';
+    const fontSecondary = width > 2000 ? '12px monospace' : '5px monospace'; // original size
+    const fontPxPrimary = width > 2000 ? 16 : 7;
 
     // Clear background
     ctx.fillStyle = '#000000';
@@ -51,7 +59,7 @@ const drawGraphFrame = (
     const graphHeight = height * 0.6;
 
     // Draw time cursor
-    const x = (currentTime % 10000) / 10000 * width; // Wrap every 10s for visual
+    const x = (currentTime % mainTimeWindow) / mainTimeWindow * width; // Wrap explicitly
     ctx.strokeStyle = '#FF0000';
     ctx.lineWidth = width > 2000 ? 4 : 1; // Thicker line for high-res
     ctx.beginPath();
@@ -61,18 +69,18 @@ const drawGraphFrame = (
 
     // Draw Timestamp next to cursor
     ctx.fillStyle = '#FF0000';
-    ctx.font = width > 2000 ? '27px monospace' : '7px monospace';
-    ctx.fillText(`${Math.round(currentTime)} ms`, x + (width > 2000 ? 10 : 4), width > 2000 ? 27 : 7);
+    ctx.font = fontPrimary;
+    ctx.fillText(`${Math.round(currentTime)} ms`, x + (width > 2000 ? 6 : 4), fontPxPrimary);
 
     // Draw spikes
-    // Draw spikes within the current 10s page
-    const pageIndex = Math.floor(currentTime / 10000);
+    // Draw spikes within the current page
+    const pageIndex = Math.floor(currentTime / mainTimeWindow);
 
     spikes.forEach(s => {
-        const spikePageIndex = Math.floor(s.timestamp_ms / 10000);
+        const spikePageIndex = Math.floor(s.timestamp_ms / mainTimeWindow);
 
         if (spikePageIndex === pageIndex) {
-            const sx = ((s.timestamp_ms % 10000) / 10000) * width;
+            const sx = ((s.timestamp_ms % mainTimeWindow) / mainTimeWindow) * width;
             const sy = (s.neuron_id / maxNeuronId) * graphHeight;
 
             // Determine visibility/alpha based on distance from current time
@@ -97,15 +105,14 @@ const drawGraphFrame = (
     ctx.strokeRect(0, zoomY, width, zoomHeight);
 
     // Sliding Window Logic:
-    // Show a window of [currentTime - 500, currentTime] (0.5 seconds history)
-    const zoomWindowDuration = 500;
-    const zoomWindowStart = currentTime - zoomWindowDuration;
+    // Show a window of [currentTime - zoomWindowDur, currentTime]
+    const zoomWindowStart = currentTime - zoomWindowDur;
     const zoomWindowEnd = currentTime;
 
     spikes.forEach(s => {
         if (s.timestamp_ms >= zoomWindowStart && s.timestamp_ms <= zoomWindowEnd) {
-            // Map time to X: (time - start) / duration * width
-            const sx = ((s.timestamp_ms - zoomWindowStart) / zoomWindowDuration) * width;
+            // Map time to X: (time - start) / zoomWindowDur * width
+            const sx = ((s.timestamp_ms - zoomWindowStart) / zoomWindowDur) * width;
             // Scientifically accurate mapping: ID / MaxID
             const sy = zoomY + (s.neuron_id / maxNeuronId) * zoomHeight;
 
@@ -118,15 +125,15 @@ const drawGraphFrame = (
 
             // Draw Tiny Tag (Neuron ID)
             ctx.fillStyle = '#AAAAAA';
-            ctx.font = width > 2000 ? '12px monospace' : '5px monospace';
+            ctx.font = fontSecondary;
             ctx.fillText(s.neuron_id.toString(), sx, sy - (radius + 2));
         }
     });
 
     // Draw indicator
     ctx.fillStyle = '#FF0000';
-    ctx.font = width > 2000 ? '27px monospace' : '7px monospace';
-    ctx.fillText("LIVE ZOOM (SLIDING)", width > 2000 ? 20 : 5, zoomY + (width > 2000 ? 33 : 8));
+    ctx.font = fontPrimary;
+    ctx.fillText("LIVE ZOOM (SLIDING)", width > 2000 ? 12 : 5, zoomY + (width > 2000 ? 20 : 8));
 
 
     // 3. Text Area (Bottom Section)
@@ -142,7 +149,7 @@ const drawGraphFrame = (
 
     if (isEventActive && focusData) {
         ctx.fillStyle = '#FFF';
-        ctx.font = width > 2000 ? '27px monospace' : '7px monospace';
+        ctx.font = fontPrimary;
         const neurons = focusData.neuronIds;
 
         // Typewriter effect logic
@@ -161,9 +168,9 @@ const drawGraphFrame = (
         // Word wrap / Multi-line render
         const words = text.split(' ');
         let line = '';
-        let y = textY + (width > 2000 ? 40 : 10);
-        const lineHeight = width > 2000 ? 33 : 8;
-        const margin = width > 2000 ? 40 : 10;
+        let y = textY + (width > 2000 ? 24 : 10);
+        const lineHeight = width > 2000 ? 20 : 8;
+        const margin = width > 2000 ? 24 : 10;
 
         for (let n = 0; n < words.length; n++) {
             const testLine = line + words[n] + ' ';
@@ -297,10 +304,7 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
                 mode,
                 focusDataRef.current,
                 timestamp,
-                modeTimerRef.current,
-                timestamp,
-                modeTimerRef.current,
-                enableStrobe
+                modeTimerRef.current
             );
 
             animationFrameId = requestAnimationFrame(render);
@@ -316,8 +320,8 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
     const handleExportFrame = async () => {
         setIsExporting(true);
         try {
-            // 7680 x 2160
-            const exportWidth = 7680;
+            // 15360 x 2160
+            const exportWidth = 15360;
             const exportHeight = 2160;
 
             const offscreen = document.createElement('canvas');
@@ -336,8 +340,7 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
                     mode,
                     focusDataRef.current,
                     performance.now(),
-                    modeTimerRef.current,
-                    enableStrobe
+                    modeTimerRef.current
                 );
 
                 offscreen.toBlob((blob) => {
@@ -358,16 +361,24 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
         setExportProgress(0);
 
         try {
-            const zip = new JSZip();
-            // Use 1080p for sequence to keep size manageable? Or full 4K?
-            // User asked for "High-Res". Let's stick to 1920x1080 for sequence to avoid OOM, 
-            // or maybe 3840x1080? 
-            // Let's do 3840x1080 (Half of the massive res) to be safe, or just 1920x540 (1/4).
-            // Actually, let's try 1920x1080. 7680x2160 for 5000 frames is 500GB.
-            // Let's assume "High-Res" for sequence means 1920x1080 or similar.
-            // I'll use 3840x1080.
-            const w = 3840;
-            const h = 1080;
+            let dirHandle: any = null;
+            if ('showDirectoryPicker' in window) {
+                try {
+                    // @ts-ignore
+                    dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                } catch (e) {
+                    // User aborted directory picker
+                    console.log('Directory picker cancelled');
+                    setIsExporting(false);
+                    return;
+                }
+            }
+
+            const zip = dirHandle ? null : new JSZip();
+            
+            // Use 15360x2160 for sequence to match the requested high resolution
+            const w = 15360;
+            const h = 2160;
 
             const offscreen = document.createElement('canvas');
             offscreen.width = w;
@@ -376,22 +387,10 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
             if (!ctx) throw new Error("Could not create canvas");
 
             // Use targetDuration if available (seconds -> ms), otherwise default to 180s
-            // If targetDuration is 0, we might want to use the actual data length?
-            // For now, let's trust the prop if it's > 0.
             const totalDuration = (targetDuration && targetDuration > 0) ? targetDuration * 1000 : 180000;
-            const fps = 30;
+            const fps = 30; // 30 FPS frames
             const step = 1000 / fps;
             const totalFrames = Math.ceil(totalDuration / step);
-
-            // We need to simulate the "Mode" logic roughly
-            // This is hard because mode depends on playback history.
-            // For a pure visual export, maybe we just export 'NORMAL' mode?
-            // Or we simulate the trigger?
-            // Simulating trigger is complex. 
-            // Let's export in 'NORMAL' mode for consistency, or just capture what's there.
-            // Actually, if we just iterate time, we miss the interactive triggers.
-            // But the user wants the "Loop".
-            // Let's simulate the trigger logic!
 
             let simMode: GraphMode = 'NORMAL';
             let simModeTimer = 0;
@@ -440,29 +439,54 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
                 }
 
                 // --- Render ---
-                drawGraphFrame(ctx, w, h, spikes, neurons, t, simMode, simFocusData, t, simModeTimer, enableStrobe);
+                drawGraphFrame(ctx, w, h, spikes, neurons, t, simMode, simFocusData, t, simModeTimer);
 
-                // --- Save Frame ---
-                const blob = await new Promise<Blob | null>(r => offscreen.toBlob(r, 'image/png'));
-                if (blob) {
+                // --- Save Frame (Optimized for Huge Resolutions) ---
+                const dataUrl = offscreen.toDataURL('image/png', 1.0); // Get Base64 string directly
+                
+                if (dirHandle) {
                     const fileName = `frame_${String(i).padStart(5, '0')}.png`;
-                    zip.file(fileName, blob);
+                    const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+                    const writable = await fileHandle.createWritable();
+
+                    // Convert base64 to Uint8Array directly for much faster disk streaming than blob encoding
+                    const base64Data = dataUrl.replace(/^data:image\/png;base64,/, "");
+                    const binaryString = atob(base64Data);
+                    const len = binaryString.length;
+                    const bytes = new Uint8Array(len);
+                    for (let j = 0; j < len; j++) {
+                        bytes[j] = binaryString.charCodeAt(j);
+                    }
+                    
+                    await writable.write(bytes);
+                    await writable.close();
+                } else if (zip) {
+                    const fileName = `frame_${String(i).padStart(5, '0')}.png`;
+                    const base64Data = dataUrl.replace(/^data:image\/png;base64,/, "");
+                    zip.file(fileName, base64Data, { base64: true });
                 }
 
-                // Update Progress
-                if (i % 10 === 0) {
+                // Update Progress periodically
+                // Allow the UI thread to breathe more often since the write operations are heavy
+                if (i % 2 === 0) {
                     setExportProgress(Math.round((i / totalFrames) * 100));
-                    await new Promise(r => setTimeout(r, 0)); // Yield to UI
+                    // A larger breather to let garbage collection run on old base64 strings
+                    await new Promise(r => setTimeout(r, 10));
                 }
             }
 
-            // Generate ZIP
-            const content = await zip.generateAsync({ type: 'blob' });
-            saveAs(content, 'graph_sequence_highres.zip');
+            // Generate ZIP if fallback was used
+            if (zip) {
+                const content = await zip.generateAsync({ type: 'blob' });
+                saveAs(content, 'graph_sequence_highres.zip');
+            } else {
+                alert('Success! Sequence export completed directly to the selected folder.');
+            }
             setIsExporting(false);
 
         } catch (e) {
             console.error("Sequence export failed", e);
+            alert("Export failed. File sequence may be too large or directory permission denied.");
             setIsExporting(false);
         }
     };
@@ -509,7 +533,7 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
                     onClick={handleExportFrame}
                     disabled={isExporting}
                 >
-                    {isExporting ? 'Processing...' : 'Export Frame (7680x2160)'}
+                    {isExporting ? 'Processing...' : 'Export Frame (15360x2160)'}
                 </button>
                 <button
                     className="btn"

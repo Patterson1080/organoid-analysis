@@ -1,23 +1,13 @@
 # Brain Organoid Analysis
 
-A minimalist, data-driven web application for visualizing and streaming brain organoid neuron locations and spike activity.
-
-## Features
-
-- **Dual CSV Upload**: Upload neuron location and spike activity data
-- **Organoid Map**: Interactive D3.js visualization showing neuron positions with backbone differentiation
-- **Spike Activity Analysis**: 
-  - Network activity timeline
-  - Firing rate distribution
-  - Spike raster plot
-- **Minimalist Design**: Monochromatic palette, geometric typography, data-first presentation
+A real-time neural activity visualization system for brain organoid multi-electrode array (MEA) recordings. Designed for high-resolution LED projection displays and scientific archival output. Inspired by the aesthetic sensibilities of Ryoji Ikeda and Refik Anadol.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js (v16 or higher)
-- npm or yarn
+- npm
 
 ### Installation
 
@@ -28,7 +18,9 @@ npm install
 ### Development
 
 ```bash
-npm run dev
+npm run dev          # Vite dev server only
+npm start            # Dev server + OSC bridge (for live MEA data)
+npm run electron:dev # Desktop app with Electron
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
@@ -37,7 +29,10 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ```bash
 npm run build
+npm run electron:build  # Windows desktop build
 ```
+
+---
 
 ## Data Format
 
@@ -49,10 +44,12 @@ neuron_id,x,y,is_backbone
 2,0.7,0.8,false
 ```
 
-- `neuron_id`: Unique identifier for the neuron
-- `x`: X position (0-1 range recommended)
-- `y`: Y position (0-1 range recommended)
-- `is_backbone`: Boolean indicating if neuron is a backbone neuron
+| Field | Description |
+|---|---|
+| `neuron_id` | Unique identifier for the neuron |
+| `x` | X position (0–1 range recommended) |
+| `y` | Y position (0–1 range recommended) |
+| `is_backbone` | Boolean — backbone neurons are highlighted in the spatial map |
 
 ### Spike Activity CSV
 
@@ -62,30 +59,157 @@ timestamp_ms,neuron_id
 2.3,10
 ```
 
-- `timestamp_ms`: Time of spike in milliseconds
-- `neuron_id`: ID of neuron that fired
+| Field | Description |
+|---|---|
+| `timestamp_ms` | Time of spike in milliseconds |
+| `neuron_id` | ID of neuron that fired |
 
-Sample rate: 20kHz
+Sample rate: 20 kHz
 
-## Sample Data
+---
 
-Sample CSV files are provided in the `sample_data/` directory:
-- `neurons.csv` - 30 neurons with backbone markers
-- `spikes.csv` - 100 spike events
+## Components
+
+### Organoid Map (3D)
+Interactive Three.js scatter plot of neuron positions. Neurons light up in real-time as spikes are detected. Supports OBJ export for use in external 3D tools.
+
+### Spike Analysis
+Raster plots, firing rate distributions, and per-neuron activity breakdowns. Includes spatial, spectral, and temporal heatmaps for identifying active regions over time.
+
+### PCA Trajectory
+Principal component analysis of population activity projected into 3D space, showing how the organoid's collective state evolves over time.
+
+### Real-Time Graph
+A horizontal timeline visualization that shows spike activity as vertical bars, with automatic burst detection that triggers strobe/focus modes to highlight synchronous firing events. Supports ultra-high-resolution export (15360×2160) as individual frames or ZIP sequences for video compositing.
+
+### Hypergraphs
+3D hypergraph visualization of neuron connectivity patterns, rendered with force-directed layout.
+
+---
+
+## Circular Event Topology
+
+A radial network diagram optimized for circular LED projection displays. Renders on a `<canvas>` element with multi-pass compositing. Activated via the **CIRCULAR TOPOLOGY** button in the sidebar.
+
+### What It Shows
+
+Neurons are arranged around the circle's perimeter, indexed by their `neuron_id`. The visualization has three layers of information:
+
+**1. Radial Activity Histogram**
+Bars protrude outward from the circle's edge. Each bar represents one neuron; bar length is proportional to cumulative spike count relative to the most active neuron. Color encodes instantaneous activity intensity using a vivid gradient:
+
+- **Electric blue** — low activity / low correlation
+- **Magenta** — medium activity
+- **Bright red** — high activity / burst peak
+
+This palette (inspired by Marian Bantjes's vein drawings) makes firing intensity immediately readable on high-brightness LED walls.
+
+**2. Dynamic Neural Links**
+Curved connections drawn between neurons that fire within the same time window. Each connection fades over 1200 ms, so the web of links reflects recent co-activation patterns. Curves are cubic Béziers routed through the neurons' physical x,y positions in the inner spatial map, so the chord geometry reflects actual organoid topology rather than arbitrary bundling.
+
+**3. Inner Spatial Map (Backbone Neurons)**
+The 27 backbone neurons are plotted in their actual x,y MEA coordinates inside the inner circle. Dashed lines connect each backbone node to its perimeter position, linking the topological view to the physical layout. Non-backbone neurons are omitted to avoid clutter.
+
+**4. Symmetric Chaos Mode (Field–Golubitsky)**
+During large burst events (instantaneous firing rate > 3× baseline), the visualization enters a symmetry mode inspired by *Symmetry in Chaos* (Field & Golubitsky):
+
+- **Burst detection** — a rolling 200 ms window is compared against a 2-second baseline
+- **Symmetry order** — dihedral group D_n chosen by burst size: D3 (small), D5 (medium), D7 (large), D9 (massive). Live display caps at D5 for performance
+- **Connection replication** — every neural link is replicated n times, each rotated by 2π/n, using pre-cached rotation matrices (no per-link trig)
+- **Chaotic attractor overlay** — a Field–Golubitsky iterated map `f(z) = λz + αz̄^(n-1) + β|z|²z` is computed and rendered as a golden web; parameters are randomised per burst so each event produces a unique geometry
+- **Symmetry breaking** — as the burst subsides, copies are progressively perturbed with sinusoidal offsets, dissolving perfect symmetry into near-symmetric remnants
+
+**5. Rotating Zoom Window (Clock Index)**
+A thin red annular-sector rotates clockwise around the perimeter, completing one revolution every 12 seconds. It acts as a clock index, framing the currently-sampled arc of neurons. A small red timestamp (`T:9970ms  F:299`) is arc-rendered inside the wedge, following the curvature of the frame.
+
+### HUD Overlay
+
+Text is rendered along the outer circle perimeter using per-character arc placement, so all labels follow the curve:
+
+| Label | Meaning |
+|---|---|
+| `NEURAL_TOPOLOGY_V1.0` | Visualization format version (top arc, blue) |
+| `DATA_TIME: 4523ms` | Current playback position in the recording |
+| `NEURONS: 131` | Total neuron count in the loaded dataset |
+| `LINKS: 847` | Number of currently visible connections (fading over 1200 ms) |
+| `D5 SYMMETRY [87%]` | Active symmetry mode and ramp-up intensity |
+| `BREAKING [42%]` | Symmetry dissolution progress during burst decay |
+| `FIELD-GOLUBITSKY SYMMETRIC CHAOS · ORGANOID NEURAL TOPOLOGY` | Credits arc (bottom) |
+
+### Performance Architecture
+
+The renderer is optimized for real-time display of 1000+ neuron datasets:
+
+- **Pre-computed geometry** — per-neuron angle, cos/sin, and inner-map coordinates are cached in a `useMemo` array, eliminating all per-frame trig for static geometry
+- **Batched draw calls** — histogram, tick marks, links, and dots are accumulated into `Path2D` buckets (8 activity buckets for histogram, 4 for ticks, 6 for links) and stroked/filled in a small fixed number of GPU calls per frame instead of one per neuron
+- **Adaptive frame cap** — 30 fps normally; drops to 20 fps during active symmetry/burst events to keep the main thread responsive
+- **No `shadowBlur`** — all glow effects are layered with transparent strokes/fills, avoiding the canvas shadow pipeline which tanks GPU performance
+
+### Export
+
+- **Export Frame** — renders the current state at 2048×2048 as a single PNG
+- **Export Sequence (ZIP)** — renders the full recording as a 30 fps PNG sequence at 2048×2048. Frame count is `targetDuration × 30` (e.g. 750 s → 22,500 frames). Uses the File System Access API for direct directory writes when available, with JSZip fallback. A pointer-walk over sorted spikes ensures O(n) accumulation — no per-frame filter scan
+
+---
+
+## Neural Regions
+
+A second circular graph activated via the **NEURAL REGIONS** button. Uses the same rendering engine in `mode="regions"`, adding:
+
+- **Region arcs** — neurons are divided into 7 equal arc-segments along the perimeter. Each segment is drawn as a thick colored arc whose hue follows the activity gradient (blue → magenta → red)
+- **Radial tick rays** — a faint ray extends from each region boundary to the label radius
+- **Arc-curved region labels** — `REGION_01 [37%]` labels are rendered with the same per-character arc placement used by the HUD, so they follow the circle rather than appearing as flat rotated text. Labels are centred on each region's angular midpoint
+- **Same rotating clock-index** as the topology graph, with the timestamp arc inside the wedge
+
+---
+
+## Playback Controls
+
+The transport panel uses a unified 4×2 button grid with no gap between rows:
+
+| Row | Col 1 | Col 2 | Col 3 | Col 4 |
+|---|---|---|---|---|
+| 1 | `<` step | `> PLAY` | `[] STOP` | `>` step |
+| 2 | `[ ] LOOP` | `[-] SOUND` | `< REVERSE` | `[ ] SPOUT` |
+
+`[] STOP` (row 1, col 3) is directly above `< REVERSE` (row 2, col 3). Active state inverts the cell to white-on-black. The current timestamp `T: {ms} MS` appears below the grid, unboxed.
+
+**Target Playback Duration** controls playback speed: the data window is stretched or compressed to fit the target duration. Setting 750 s produces a 0.24× slow-motion render of a 180 s dataset.
+
+---
+
+## OSC Bridge
+
+The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for receiving live spike data from MEA recording systems. Configure input/output ports and target IP in the UI.
+
+## Spout Output
+
+Optional Spout texture sharing for feeding the visualization into TouchDesigner, Resolume, or other real-time video tools. Toggle with the `[ ] SPOUT` button.
+
+---
 
 ## Tech Stack
 
-- **Frontend**: React + TypeScript
-- **Build Tool**: Vite
-- **Visualization**: D3.js, Recharts
-- **CSV Parsing**: PapaParse
-- **Typography**: Outfit (geometric sans-serif)
+| Layer | Technology |
+|---|---|
+| Frontend | React 18 + TypeScript + Vite |
+| 3D Rendering | Three.js |
+| 2D Rendering | Canvas 2D API + Path2D batching |
+| Data Processing | D3.js, Recharts, PapaParse |
+| Desktop | Electron |
+| Live Data | OSC over WebSocket |
+| Export | File System Access API + JSZip + file-saver |
+
+---
 
 ## Design Philosophy
 
-The application embodies:
-- **Ryoji Ikeda**: Minimal interface, monochromatic palette, data as art, precision
-- **Refik Anadol**: Fluid data visualization, particle aesthetics, dynamic interactions
+- **Ryoji Ikeda** — minimal interface, monochromatic palette, data as art, precision typography
+- **Refik Anadol** — fluid data visualization, particle aesthetics, dynamic interactions
+- **Field & Golubitsky** — symmetric chaos: mathematical beauty emerging from biological complexity
+- **Marian Bantjes** — vein-like color gradients that encode intensity as organic warmth
+
+---
 
 ## License
 

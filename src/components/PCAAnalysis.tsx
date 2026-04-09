@@ -67,7 +67,7 @@ const PCAAnalysis: React.FC<PCAAnalysisProps> = ({ spikes, neurons, binSizeMs = 
                     <CartesianGrid strokeDasharray="3 3" stroke="#444" />
                     <XAxis type="number" dataKey="pc1" name="PC1" stroke="#888" label={{ value: 'PC1', position: 'bottom', fill: '#888' }} />
                     <YAxis type="number" dataKey="pc2" name="PC2" stroke="#888" label={{ value: 'PC2', angle: -90, position: 'left', fill: '#888' }} />
-                    <ZAxis type="number" dataKey="time" name="Time" range={[0, 500]} />
+                    <ZAxis type="number" dataKey="time" name="Time" range={[0, 1000]} />
                     <Tooltip
                         cursor={{ strokeDasharray: '3 3' }}
                         contentStyle={{ backgroundColor: '#333', border: 'none', color: '#fff' }}
