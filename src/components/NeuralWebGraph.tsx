@@ -1,0 +1,805 @@
+// NeuralWebGraph.tsx
+// Flight Patterns + Time Cube — accumulating co-firing Bézier web, white-on-black
+// Z=0 front (now) → Z=1 back (past). Depth-of-field: focal plane near Z=0.1.
+// All UI strictly inside cube front-face bounds.
+
+import { useRef, useEffect, useMemo, useCallback, forwardRef, useImperativeHandle, useState } from 'react';
+import { Neuron, SpikeEvent } from '../types';
+import { saveAs } from 'file-saver';
+
+interface NeuralWebGraphProps {
+    spikes: SpikeEvent[];
+    neurons: Neuron[];
+    currentTime: number;
+    startTime: number;
+    endTime: number;
+    width?: number;
+    height?: number;
+    exportResolution?: number;
+}
+export interface NeuralWebGraphHandle { exportPNG: () => void; }
+
+// Depth-of-field alpha: focal plane at Z=0.05 (very front), falls off into past
+function webAlpha(z: number, strength: number): number {
+    const focal   = 0.05;
+    const falloff = Math.abs(z - focal);
+    // bright near focal plane, dim in depth (simulating narrow DoF)
+    const dof = Math.max(0.15, 1 - falloff * 1.4);
+    return (0.07 + (1 - z) * 0.14 + strength * 0.05) * dof;
+}
+
+// Perspective projection with slight tilt (cube feels 3D)
+function proj(wx: number, wy: number, wz: number, S: number, half: number) {
+    const fov = S * 0.82;
+    const d   = fov / (fov + wz * S * 0.48);
+    // slight vertical tilt: y shifts upward slightly as z increases
+    return {
+        sx: S * 0.5 + wx * d,
+        sy: S * 0.5 + wy * d - wz * half * 0.06,
+        d,
+    };
+}
+
+interface StoredLink {
+    x1: number; y1: number;
+    x2: number; y2: number;
+    cpx: number; cpy: number;
+    z: number;
+    strength: number;
+    birthMs: number;   // actual recording timestamp (for sequence export)
+}
+
+const GRID = 10;
+const FOCAL_Z = 0.05; // links near this depth are sharpest/brightest
+
+// Module-level pure renderer — no React closure, safe for export callbacks
+function strokeLink(
+    ctx2: CanvasRenderingContext2D,
+    l: StoredLink, S: number, half: number
+) {
+    const a = proj(l.x1*half, l.y1*half, l.z, S, half);
+    const b = proj(l.x2*half, l.y2*half, l.z, S, half);
+    const c = proj(l.cpx*half, l.cpy*half, l.z, S, half);
+    ctx2.strokeStyle = `rgba(255,255,255,${webAlpha(l.z, l.strength).toFixed(3)})`;
+    ctx2.lineWidth = 0.45;
+    ctx2.beginPath();
+    ctx2.moveTo(a.sx, a.sy);
+    ctx2.quadraticCurveTo(c.sx, c.sy, b.sx, b.sy);
+    ctx2.stroke();
+}
+
+const NeuralWebGraph = forwardRef<NeuralWebGraphHandle, NeuralWebGraphProps>(({
+    spikes, neurons, currentTime, startTime, endTime,
+    width = 800, height = 800, exportResolution = 2048,
+}, ref) => {
+    const canvasRef    = useRef<HTMLCanvasElement>(null);
+    const rafRef       = useRef<number>(0);
+    const linksRef     = useRef<StoredLink[]>([]);
+    const webOSRef     = useRef<HTMLCanvasElement | null>(null);
+    const lastDrawnRef = useRef(0);
+    const needsRebuild = useRef(true);
+    const lastTimeRef  = useRef(startTime);
+    const densityGrid  = useRef<Float32Array>(new Float32Array(GRID * GRID));
+    const hotRef       = useRef({ wx: 0.0, wy: 0.0 });
+    const sparkRef     = useRef<number[]>(new Array(40).fill(0));
+    const burstRef     = useRef({ active: false, pct: 0 });
+    const [isExporting, setIsExporting] = useState(false);
+    const [exportPct, setExportPct] = useState(0);
+
+    const { sortedSpikes, bounds, neuronMap, neuronArr, bbNeurons } = useMemo(() => {
+        const sorted = [...spikes].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        neurons.forEach(n => {
+            if (n.x < x0) x0 = n.x; if (n.x > x1) x1 = n.x;
+            if (n.y < y0) y0 = n.y; if (n.y > y1) y1 = n.y;
+        });
+        if (!isFinite(x0)) { x0 = 0; x1 = 1; y0 = 0; y1 = 1; }
+        const nm = new Map<number, number>();
+        neurons.forEach((n, i) => nm.set(n.neuron_id, i));
+        return {
+            sortedSpikes: sorted,
+            bounds: { x0, x1: x1 === x0 ? x0+1 : x1, y0, y1: y1 === y0 ? y0+1 : y1 },
+            neuronMap: nm, neuronArr: neurons,
+            bbNeurons: neurons.filter(n => n.is_backbone),
+        };
+    }, [spikes, neurons]);
+
+    const totalMs = Math.max(1, endTime - startTime);
+
+    // ── generate links for spike window (t0, t1] ──────────────────────────────
+    const addLinks = useCallback((t0: number, t1: number, targetLinks?: StoredLink[]) => {
+        const dest = targetLinks ?? linksRef.current;
+        const rX = bounds.x1 - bounds.x0, rY = bounds.y1 - bounds.y0;
+        const buckets = new Map<number, number[]>();
+        for (const s of sortedSpikes) {
+            if (s.timestamp_ms <= t0) continue;
+            if (s.timestamp_ms > t1) break;
+            const bk = Math.floor(s.timestamp_ms / 8);
+            const arr = buckets.get(bk);
+            if (arr) arr.push(s.neuron_id);
+            else buckets.set(bk, [s.neuron_id]);
+        }
+        buckets.forEach((ids) => {
+            if (ids.length < 2) return;
+            const uids = [...new Set(ids)];
+            const midT  = t0 + (t1 - t0) / 2;
+            // z = fraction of total elapsed time (front=now, back=past)
+            const z = Math.max(0, Math.min(1, 1 - (midT - startTime) / totalMs));
+            const strength = Math.min(1, uids.length / 15);
+            const cap = Math.min(18, uids.length);
+            let cnt = 0;
+            for (let i = 0; i < uids.length && cnt < cap; i++) {
+                for (let j = i+1; j < uids.length && cnt < cap; j++) {
+                    const ai = neuronMap.get(uids[i]), bi = neuronMap.get(uids[j]);
+                    if (ai === undefined || bi === undefined) continue;
+                    const na = neuronArr[ai], nb = neuronArr[bi];
+                    const x1v = ((na.x - bounds.x0)/rX)*2-1;
+                    const y1v = ((na.y - bounds.y0)/rY)*2-1;
+                    const x2v = ((nb.x - bounds.x0)/rX)*2-1;
+                    const y2v = ((nb.y - bounds.y0)/rY)*2-1;
+                    const mx = (x1v+x2v)*0.5, my = (y1v+y2v)*0.5;
+                    const dx = x2v-x1v, dy = y2v-y1v;
+                    const len = Math.sqrt(dx*dx + dy*dy) || 1;
+                    const side = Math.random() < 0.5 ? 1 : -1;
+                    const bow  = side * (0.02 + Math.random() * 0.1);
+                    dest.push({
+                        x1: x1v, y1: y1v, x2: x2v, y2: y2v,
+                        cpx: mx + (-dy/len)*bow,
+                        cpy: my + ( dx/len)*bow,
+                        z, strength,
+                        birthMs: midT,
+                    });
+                    cnt++;
+                }
+            }
+        });
+        if (dest === linksRef.current && dest.length > 35000)
+            dest.splice(0, dest.length - 35000);
+    }, [sortedSpikes, neuronMap, neuronArr, bounds, startTime, totalMs]);
+
+    // ── stats update ──────────────────────────────────────────────────────────
+    const updateStats = useCallback((t: number) => {
+        const grid = densityGrid.current;
+        grid.fill(0);
+        const rX = bounds.x1 - bounds.x0, rY = bounds.y1 - bounds.y0;
+        let cnt = 0;
+        for (const s of sortedSpikes) {
+            if (s.timestamp_ms < t - 500) continue;
+            if (s.timestamp_ms > t) break;
+            const ni = neuronMap.get(s.neuron_id);
+            if (ni === undefined) continue;
+            const n = neuronArr[ni];
+            const gx = Math.min(GRID-1, Math.floor(((n.x - bounds.x0)/rX)*GRID));
+            const gy = Math.min(GRID-1, Math.floor(((n.y - bounds.y0)/rY)*GRID));
+            grid[gy*GRID+gx]++; cnt++;
+        }
+        let mx = 0, hgx = 0, hgy = 0;
+        for (let r = 0; r < GRID; r++) for (let c2 = 0; c2 < GRID; c2++) {
+            if (grid[r*GRID+c2] > mx) { mx = grid[r*GRID+c2]; hgx = c2; hgy = r; }
+        }
+        hotRef.current = { wx: (hgx+0.5)/GRID*2-1, wy: (hgy+0.5)/GRID*2-1 };
+        const sp = sparkRef.current;
+        sp.push(cnt); if (sp.length > 40) sp.shift();
+        const recent = sp.slice(-4).reduce((a,b)=>a+b,0)/4;
+        const avg    = sp.reduce((a,b)=>a+b,0)/sp.length;
+        burstRef.current = { active: recent > avg*2.5 && recent > 2, pct: avg > 0 ? Math.min(1, recent/(avg*4)) : 0 };
+    }, [sortedSpikes, neuronMap, neuronArr, bounds]);
+
+    // ── offscreen canvas: incremental accumulation ────────────────────────────
+    const syncWebOS = useCallback((S: number, half: number) => {
+        if (needsRebuild.current || !webOSRef.current || webOSRef.current.width !== S) {
+            let oc = webOSRef.current;
+            if (!oc || oc.width !== S) {
+                oc = document.createElement('canvas');
+                oc.width = S; oc.height = S;
+                webOSRef.current = oc;
+            }
+            const ctx2 = oc.getContext('2d')!;
+            ctx2.clearRect(0, 0, S, S);
+            const sorted = [...linksRef.current].sort((a,b) => b.z - a.z);
+            for (const l of sorted) strokeLink(ctx2, l, S, half);
+            lastDrawnRef.current = linksRef.current.length;
+            needsRebuild.current = false;
+        } else if (lastDrawnRef.current < linksRef.current.length) {
+            const ctx2 = webOSRef.current.getContext('2d')!;
+            for (let i = lastDrawnRef.current; i < linksRef.current.length; i++)
+                strokeLink(ctx2, linksRef.current[i], S, half);
+            lastDrawnRef.current = linksRef.current.length;
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ── main draw function ────────────────────────────────────────────────────
+    const drawFrame = useCallback((
+        canvas: HTMLCanvasElement, t: number,
+        exportLinks?: StoredLink[]  // if set, use this link set instead of linksRef (for export)
+    ) => {
+        const S     = canvas.width;
+        const scale = S / 800;
+        const half  = S * 0.46;    // expanded — web fills more of cube volume
+        const ctx   = canvas.getContext('2d')!;
+
+        if (!exportLinks) {
+            updateStats(t);
+            syncWebOS(S, half);
+        }
+
+        // ── BACKGROUND ────────────────────────────────────────────────────────
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, S, S);
+
+        // ── WEB ───────────────────────────────────────────────────────────────
+        if (exportLinks) {
+            // Export path: render directly (sorted back→front)
+            const sorted = [...exportLinks].sort((a,b) => b.z - a.z);
+            for (const l of sorted) strokeLink(ctx, l, S, half);
+        } else if (webOSRef.current) {
+            ctx.drawImage(webOSRef.current, 0, 0);
+        }
+
+        // ── CUBE WIREFRAME ─────────────────────────────────────────────────────
+        type V3 = [number,number,number];
+        const verts: V3[] = [
+            [-1,-1,0],[1,-1,0],[1,1,0],[-1,1,0],
+            [-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1],
+        ];
+        const C = verts.map(([wx,wy,wz]) => proj(wx*half, wy*half, wz, S, half));
+        const edges: [number,number][] = [
+            [0,1],[1,2],[2,3],[3,0],
+            [4,5],[5,6],[6,7],[7,4],
+            [0,4],[1,5],[2,6],[3,7],
+        ];
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(255,255,255,0.80)';
+        ctx.lineWidth = 1.0 * scale;
+        edges.forEach(([a,b]) => {
+            ctx.beginPath();
+            ctx.moveTo(C[a].sx, C[a].sy);
+            ctx.lineTo(C[b].sx, C[b].sy);
+            ctx.stroke();
+        });
+
+        // front face bounds
+        const fX = C[0].sx, fY = C[0].sy;
+        const fW = C[1].sx - C[0].sx;
+        const fH = C[2].sy - C[1].sy;
+        const mg = 6 * scale;
+        const mono = 'monospace';
+        const tsz  = Math.round(7 * scale);
+
+        // ── NEURON DOTS (front face, z=0) ──────────────────────────────────────
+        const rX = bounds.x1 - bounds.x0, rY = bounds.y1 - bounds.y0;
+        ctx.font = `${tsz}px ${mono}`;
+
+        // non-backbone
+        neuronArr.forEach(n => {
+            if (n.is_backbone) return;
+            const nx = ((n.x - bounds.x0)/rX)*2-1;
+            const ny = ((n.y - bounds.y0)/rY)*2-1;
+            const { sx, sy } = proj(nx*half, ny*half, 0, S, half);
+            ctx.beginPath(); ctx.arc(sx, sy, 0.9*scale, 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(255,255,255,0.20)'; ctx.fill();
+        });
+
+        // backbone
+        bbNeurons.forEach(n => {
+            const nx = ((n.x - bounds.x0)/rX)*2-1;
+            const ny = ((n.y - bounds.y0)/rY)*2-1;
+            const { sx, sy } = proj(nx*half, ny*half, 0, S, half);
+            const cs = 3.5*scale;
+            ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(sx-cs, sy); ctx.lineTo(sx+cs, sy);
+            ctx.moveTo(sx, sy-cs); ctx.lineTo(sx, sy+cs);
+            ctx.stroke();
+            ctx.beginPath(); ctx.arc(sx, sy, 2*scale, 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,0.55)';
+            ctx.textAlign = 'left';
+            ctx.fillText(`Neuron ${n.neuron_id}`, sx+5*scale, sy-1*scale);
+        });
+
+        // cluster labels from density
+        const grid = densityGrid.current;
+        ctx.font = `${Math.round(6.5*scale)}px ${mono}`;
+        for (let r = 0; r < GRID; r++) {
+            for (let c2 = 0; c2 < GRID; c2++) {
+                const d = grid[r*GRID+c2];
+                if (d < 3) continue;
+                const wx = (c2+0.5)/GRID*2-1;
+                const wy = (r+0.5)/GRID*2-1;
+                const { sx, sy } = proj(wx*half, wy*half, 0, S, half);
+                let bestN: Neuron|null = null, bestDist = Infinity;
+                neuronArr.forEach(n => {
+                    const nx2 = ((n.x - bounds.x0)/rX)*2-1;
+                    const ny2 = ((n.y - bounds.y0)/rY)*2-1;
+                    const dd = (nx2-wx)*(nx2-wx)+(ny2-wy)*(ny2-wy);
+                    if (dd < bestDist) { bestDist = dd; bestN = n; }
+                });
+                if (bestN) {
+                    const bn = bestN as Neuron;
+                    const act = Math.min(1, d/10);
+                    ctx.fillStyle = `rgba(255,255,255,${(0.35 + act*0.55).toFixed(2)})`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(bn.is_backbone ? `B·${bn.neuron_id}` : `N·${bn.neuron_id}`,
+                        sx, sy - 7*scale);
+                }
+            }
+        }
+
+        // ── PANEL HELPER ──────────────────────────────────────────────────────
+        const panel = (
+            px: number, py: number, pw: number, ph: number,
+            title: string, lines: string[]
+        ) => {
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRect(px, py, pw, ph);
+            ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(px, py, pw, ph);
+            ctx.font = `${tsz}px ${mono}`;
+            ctx.fillStyle = 'rgba(255,255,255,0.95)';
+            ctx.textAlign = 'left';
+            ctx.fillText(title, px+4*scale, py+tsz+2*scale);
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.beginPath();
+            ctx.moveTo(px+3*scale, py+tsz+5*scale);
+            ctx.lineTo(px+pw-3*scale, py+tsz+5*scale);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(220,230,255,0.62)';
+            const lh = tsz + 2*scale;
+            lines.forEach((ln, i) =>
+                ctx.fillText(ln, px+4*scale, py+tsz*2.1 + i*lh + 2*scale)
+            );
+        };
+
+        // ── DATA ─────────────────────────────────────────────────────────────
+        const sp      = sparkRef.current;
+        const rate    = sp[sp.length-1] ?? 0;
+        const avgRate = sp.reduce((a,b)=>a+b,0)/sp.length;
+        const burst   = burstRef.current;
+        const progPct = ((t-startTime)/totalMs*100).toFixed(1);
+
+        const recentCounts = new Map<number,number>();
+        for (const s of sortedSpikes) {
+            if (s.timestamp_ms < t-500) continue;
+            if (s.timestamp_ms > t) break;
+            recentCounts.set(s.neuron_id, (recentCounts.get(s.neuron_id)??0)+1);
+        }
+        const topN = [...recentCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+        const connMap = new Map<number,number>();
+        linksRef.current.forEach(l => {
+            connMap.set(l.x1, (connMap.get(l.x1)??0)+1);
+            connMap.set(l.x2, (connMap.get(l.x2)??0)+1);
+        });
+        const maxDeg = Math.max(0, ...connMap.values());
+        const activeNodes = connMap.size;
+
+        // ── LEFT COLUMN ── 4 panels stacked ──────────────────────────────────
+        const leftPW = fW * 0.16;
+        const leftX  = fX + mg;
+
+        const p1Lines = [
+            `T: ${Math.round(t)}ms`,
+            `NEURONS: ${neurons.length}`,
+            `BACKBONE: ${bbNeurons.length}`,
+            `LINKS: ${linksRef.current.length}`,
+            `RATE: ${rate}/500ms`,
+            `BURST: ${burst.active ? `ACT ${(burst.pct*100).toFixed(0)}%` : 'IDLE'}`,
+        ];
+        const lh = tsz + 2*scale;
+        const p1H = (p1Lines.length + 1.5)*lh + tsz;
+        panel(leftX, fY+mg, leftPW, p1H, 'NEURAL_STATUS', p1Lines);
+
+        const p2Lines = topN.length > 0
+            ? topN.map(([id,c]) => `Neuron ${id}: ${c}sp`)
+            : ['-- no activity --'];
+        const p2H = (p2Lines.length + 1.5)*lh + tsz;
+        const p2Y = fY+mg + p1H + 5*scale;
+        panel(leftX, p2Y, leftPW, p2H, 'TOP_ACTIVE', p2Lines);
+
+        const p3Lines = [
+            `PROG: ${progPct}%`,
+            `${(startTime/1000).toFixed(1)}s—${(endTime/1000).toFixed(1)}s`,
+            `AVG RATE: ${avgRate.toFixed(1)}/f`,
+            `WEB NODES: ${activeNodes}`,
+        ];
+        const p3H = (p3Lines.length + 1.5)*lh + tsz;
+        const p3Y = p2Y + p2H + 5*scale;
+        panel(leftX, p3Y, leftPW, p3H, 'RECORDING', p3Lines);
+
+        // Define recent spikes for OSC
+        const currentSpikes = [];
+        for (let i = sortedSpikes.length - 1; i >= 0; i--) {
+            if (sortedSpikes[i].timestamp_ms > t) continue;
+            if (sortedSpikes[i].timestamp_ms < t - 200) break;
+            currentSpikes.push(sortedSpikes[i]);
+            if (currentSpikes.length >= 8) break;
+        }
+        
+        const p4Lines = currentSpikes.length > 0
+            ? currentSpikes.map(s => {
+                const ni = neuronArr[neuronMap.get(s.neuron_id)!];
+                return ni ? `t:${Math.round(s.timestamp_ms)} id:${ni.neuron_id} x:${ni.x.toFixed(0)} y:${ni.y.toFixed(0)}` : '';
+              }).filter(Boolean)
+            : ['--'];
+        // OSC panel: reserve extra row for pinned timer
+        const p4H = (p4Lines.length + 2.5)*lh + tsz;
+        const p4Y = Math.max(p3Y + p3H + 5*scale, fY + fH - p4H - mg);
+        const p4ActualH = Math.min(p4H, fY + fH - p4Y - mg);
+        panel(leftX, p4Y, leftPW, p4ActualH, 'OSC_VALUES', p4Lines);
+        // Pinned timer — always visible at very bottom of OSC panel
+        ctx.font = `${tsz}px ${mono}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.textAlign = 'left';
+        ctx.fillText(`T: ${Math.round(t)} ms`, leftX + 4*scale, p4Y + p4ActualH - 4*scale);
+
+
+        // ── RIGHT COLUMN ─────────────────────────────────────────────────────
+        const rightPW = fW * 0.32;
+        const rightX  = fX + fW - rightPW - mg;
+
+        // Panel A — NEURAL DIFFUSION STRANDS (with firing rate sparkline embedded)
+        const spK = sparkRef.current;
+        const maxSpK = Math.max(1, ...spK);
+        const sparkH = 14*scale;
+        const diffLines = [
+            `CONNECTIVITY: ${(activeNodes/(neurons.length||1)*100).toFixed(1)}%`,
+            `MAX DEGREE: ${maxDeg}`,
+            `CO-FIRE WIN: 8ms`,
+            `FOCAL PLANE: Z=${FOCAL_Z}`,
+            `──────────────────────`,
+            `[SDXL REF PARAMS]`,
+            `model: stable-diffusion-xl`,
+            `guidance: 7.5`,
+            `steps: 20`,
+            `seed: ${Math.round(t) % 9999}`,
+            `sampler: DPM++ 2M Karras`,
+            `prompt: neural topology`,
+        ];
+        const pAH = (diffLines.length + 1.5)*lh + tsz + sparkH + 6*scale;
+        panel(rightX, fY+mg, rightPW, pAH, 'NEURAL DIFFUSION STRANDS', diffLines);
+
+        // embed sparkline at bottom of panel A
+        const spX = rightX + 4*scale;
+        const spY2 = fY+mg + pAH - sparkH - 4*scale;
+        const spW2 = rightPW - 8*scale;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(spX, spY2, spW2, sparkH);
+        const spPath = new Path2D();
+        spK.forEach((v, i) => {
+            const bx = spX + (i/(spK.length-1))*spW2;
+            const by = spY2 + sparkH - (v/maxSpK)*(sparkH-1.5*scale) - scale;
+            i === 0 ? spPath.moveTo(bx, by) : spPath.lineTo(bx, by);
+        });
+        ctx.strokeStyle = burst.active ? 'rgba(255,80,80,0.85)' : 'rgba(200,220,255,0.7)';
+        ctx.lineWidth = 0.8*scale;
+        ctx.stroke(spPath);
+        ctx.font = `${Math.round(6*scale)}px ${mono}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.textAlign = 'left';
+        ctx.fillText(`RATE ${rate}  AVG:${avgRate.toFixed(1)}`, spX, spY2 - 1*scale);
+
+        // Panel B — ACTIVITY ZOOM
+        const hot = hotRef.current;
+        const zR  = 0.26;
+        const pBY = fY+mg + pAH + 5*scale;
+        const pBW = rightPW;
+        const pBH = Math.min(fW*0.33, fY+fH-pBY-mg);
+
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(rightX, pBY, pBW, pBH);
+        ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(rightX, pBY, pBW, pBH);
+        ctx.font = `${tsz}px ${mono}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.textAlign = 'left';
+        ctx.fillText('ACTIVITY·ZOOM', rightX+4*scale, pBY+tsz+2*scale);
+        ctx.fillStyle = 'rgba(220,230,255,0.5)';
+        ctx.fillText(`×${(1/(2*zR)).toFixed(1)} | HOT ${hot.wx.toFixed(2)},${hot.wy.toFixed(2)}`,
+            rightX+4*scale, pBY+tsz*2.4);
+
+        if (pBH > tsz*4) {
+            const zoneY = pBY + tsz*3.2;
+            const zoneH = pBH - tsz*3.2 - 4*scale;
+            const zoneW = pBW - 8*scale;
+            const zoneX = rightX + 4*scale;
+            ctx.save();
+            ctx.beginPath(); ctx.rect(zoneX, zoneY, zoneW, zoneH); ctx.clip();
+            const sc = 1/(2*zR);
+            const useLinks = exportLinks ?? linksRef.current;
+            for (const l of useLinks) {
+                const d1 = Math.max(Math.abs(l.x1-hot.wx), Math.abs(l.y1-hot.wy));
+                const d2 = Math.max(Math.abs(l.x2-hot.wx), Math.abs(l.y2-hot.wy));
+                if (d1 > zR*1.9 && d2 > zR*1.9) continue;
+                const zx1 = zoneX + ((l.x1-hot.wx+zR)*sc)*zoneW;
+                const zy1 = zoneY + ((l.y1-hot.wy+zR)*sc)*zoneH;
+                const zx2 = zoneX + ((l.x2-hot.wx+zR)*sc)*zoneW;
+                const zy2 = zoneY + ((l.y2-hot.wy+zR)*sc)*zoneH;
+                const zcx = zoneX + ((l.cpx-hot.wx+zR)*sc)*zoneW;
+                const zcy = zoneY + ((l.cpy-hot.wy+zR)*sc)*zoneH;
+                ctx.strokeStyle = `rgba(255,255,255,${(0.08 + (1-l.z)*0.22).toFixed(3)})`;
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(zx1, zy1);
+                ctx.quadraticCurveTo(zcx, zcy, zx2, zy2);
+                ctx.stroke();
+            }
+            bbNeurons.forEach(n => {
+                const nx = ((n.x - bounds.x0)/rX)*2-1;
+                const ny = ((n.y - bounds.y0)/rY)*2-1;
+                const zx = zoneX + ((nx-hot.wx+zR)*sc)*zoneW;
+                const zy = zoneY + ((ny-hot.wy+zR)*sc)*zoneH;
+                if (zx < zoneX || zx > zoneX+zoneW || zy < zoneY || zy > zoneY+zoneH) return;
+                ctx.beginPath(); ctx.arc(zx, zy, 2.5*scale, 0, Math.PI*2);
+                ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+                ctx.font = `${Math.round(6*scale)}px ${mono}`;
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Neuron ${n.neuron_id}`, zx+4*scale, zy-1*scale);
+            });
+            ctx.restore();
+        }
+
+        // Panel C — DIFFUSION OUTPUT placeholder
+        const pCY = pBY + pBH + 5*scale;
+        const pCH = fY + fH - pCY - mg;
+        if (pCH > tsz*3) {
+            ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            ctx.fillRect(rightX, pCY, pBW, pCH);
+            ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(rightX, pCY, pBW, pCH);
+            ctx.font = `${tsz}px ${mono}`;
+            ctx.fillStyle = 'rgba(255,255,255,0.92)';
+            ctx.textAlign = 'left';
+            ctx.fillText('DIFFUSION OUTPUT', rightX+4*scale, pCY+tsz+2*scale);
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.beginPath();
+            ctx.moveTo(rightX+3*scale, pCY+tsz+5*scale);
+            ctx.lineTo(rightX+pBW-3*scale, pCY+tsz+5*scale);
+            ctx.stroke();
+            // placeholder crosshairs
+            const cx2 = rightX + pBW/2;
+            const cy2 = pCY + pCH/2;
+            ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(rightX+4*scale, cy2); ctx.lineTo(rightX+pBW-4*scale, cy2);
+            ctx.moveTo(cx2, pCY+tsz+8*scale); ctx.lineTo(cx2, pCY+pCH-4*scale);
+            ctx.stroke();
+            ctx.font = `${Math.round(6.5*scale)}px ${mono}`;
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.textAlign = 'center';
+            ctx.fillText('[ VIDEO FEED ]', cx2, cy2+tsz);
+        }
+
+        // ── PROGRESS BAR on front-face bottom edge ────────────────────────────
+        const pf = Math.min(1, (t-startTime)/totalMs);
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 1.5*scale;
+        ctx.beginPath();
+        ctx.moveTo(fX, fY+fH);
+        ctx.lineTo(fX + fW*pf, fY+fH);
+        ctx.stroke();
+
+        // ── VERSION LABEL top-center ──────────────────────────────────────────
+        ctx.font = `${tsz}px ${mono}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.textAlign = 'center';
+        ctx.fillText('NEURAL·WEB·V1.0  ·  TIME·CUBE  ·  FOCAL·Z=0.05',
+            fX+fW/2, fY+tsz+3*scale);
+
+    }, [neurons, bbNeurons, neuronArr, sortedSpikes, bounds, startTime, endTime,
+        totalMs, updateStats, syncWebOS]);
+
+    // ── RAF loop ──────────────────────────────────────────────────────────────
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        let last = 0, running = true;
+        const loop = (now: number) => {
+            if (!running) return;
+            if (now - last >= 33) { last = now; drawFrame(canvas, lastTimeRef.current); }
+            rafRef.current = requestAnimationFrame(loop);
+        };
+        rafRef.current = requestAnimationFrame(loop);
+        return () => { running = false; cancelAnimationFrame(rafRef.current); };
+    }, [drawFrame]);
+
+    // ── time sync ─────────────────────────────────────────────────────────────
+    useEffect(() => {
+        const prev = lastTimeRef.current, curr = currentTime;
+        if (Math.abs(curr - prev) > 2000) {
+            linksRef.current = [];
+            needsRebuild.current = true;
+            addLinks(Math.max(startTime, curr-3000), curr);
+        } else if (curr > prev) {
+            addLinks(prev, curr);
+        }
+        lastTimeRef.current = curr;
+    }, [currentTime, addLinks, startTime]);
+
+    // ── export single PNG ─────────────────────────────────────────────────────
+    const exportPNG = useCallback(() => {
+        const R = exportResolution;
+        const half = R * 0.46;
+        // Build hi-res offscreen web canvas
+        const oc = document.createElement('canvas');
+        oc.width = R; oc.height = R;
+        const ctx2 = oc.getContext('2d')!;
+        const sorted = [...linksRef.current].sort((a, b) => b.z - a.z);
+        for (const l of sorted) strokeLink(ctx2, l, R, half);
+        // Temp-swap refs so drawFrame uses hi-res OS
+        const savedOS      = webOSRef.current;
+        const savedDrawn   = lastDrawnRef.current;
+        const savedRebuild = needsRebuild.current;
+        webOSRef.current      = oc;
+        lastDrawnRef.current  = linksRef.current.length;
+        needsRebuild.current  = false;
+        const offscreen = document.createElement('canvas');
+        offscreen.width = R; offscreen.height = R;
+        drawFrame(offscreen, lastTimeRef.current);
+        // Restore
+        webOSRef.current      = savedOS;
+        lastDrawnRef.current  = savedDrawn;
+        needsRebuild.current  = savedRebuild;
+        offscreen.toBlob(blob => {
+            if (blob) saveAs(blob, `neural_web_${Math.round(lastTimeRef.current)}ms.png`);
+        }, 'image/png');
+    }, [drawFrame, exportResolution]);
+
+    // ── export sequence (folder picker → ZIP fallback, matches CircularEventGraph) ──
+    const exportSequence = useCallback(async () => {
+        setIsExporting(true);
+        setExportPct(0);
+        const R          = exportResolution;
+        const fps        = 30;
+        const totalFrames = Math.max(1, Math.round((endTime - startTime) / 1000 * fps));
+        const msPerFrame  = (endTime - startTime) / totalFrames;
+
+        try {
+            // Try File System Access API first (gives the user a folder-picker dialog)
+            let dirHandle: FileSystemDirectoryHandle | null = null;
+            let zip: any = null;
+            try {
+                dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+            } catch {
+                try {
+                    const JSZip = (await import('jszip')).default;
+                    zip = new JSZip();
+                } catch { /* will fall through with no-op per-frame */ }
+            }
+
+            // Pre-build all links for the full range
+            const allLinks: StoredLink[] = [];
+            addLinks(startTime - 1, endTime, allLinks);
+
+            const offscreen = document.createElement('canvas');
+            offscreen.width = R; offscreen.height = R;
+            const half = R * 0.46;
+
+            for (let f = 0; f < totalFrames; f++) {
+                const frameT = startTime + (f + 1) * msPerFrame;
+                const frameLinks = allLinks.filter(l => l.birthMs <= frameT);
+
+                // Update per-frame stats refs (density, spark, burst, hot)
+                const grid = densityGrid.current;
+                grid.fill(0);
+                const rX = bounds.x1 - bounds.x0, rY = bounds.y1 - bounds.y0;
+                let cnt = 0;
+                for (const s of sortedSpikes) {
+                    if (s.timestamp_ms < frameT - 500) continue;
+                    if (s.timestamp_ms > frameT) break;
+                    const ni = neuronMap.get(s.neuron_id);
+                    if (ni === undefined) continue;
+                    const n = neuronArr[ni];
+                    const gx = Math.min(GRID-1, Math.floor(((n.x - bounds.x0)/rX)*GRID));
+                    const gy = Math.min(GRID-1, Math.floor(((n.y - bounds.y0)/rY)*GRID));
+                    grid[gy*GRID+gx]++; cnt++;
+                }
+                const sp = sparkRef.current;
+                sp.push(cnt); if (sp.length > 40) sp.shift();
+                let mx2 = 0, hgx = 0, hgy = 0;
+                for (let row = 0; row < GRID; row++) for (let col = 0; col < GRID; col++) {
+                    if (grid[row*GRID+col] > mx2) { mx2 = grid[row*GRID+col]; hgx = col; hgy = row; }
+                }
+                hotRef.current = { wx: (hgx+0.5)/GRID*2-1, wy: (hgy+0.5)/GRID*2-1 };
+                const recent2 = sp.slice(-4).reduce((a,b)=>a+b,0)/4;
+                const avg2    = sp.reduce((a,b)=>a+b,0)/sp.length;
+                burstRef.current = { active: recent2 > avg2*2.5, pct: avg2>0 ? Math.min(1, recent2/(avg2*4)) : 0 };
+
+                // Build per-frame web offscreen, temp-swap refs, draw
+                const tempOS = document.createElement('canvas');
+                tempOS.width = R; tempOS.height = R;
+                const ctx2 = tempOS.getContext('2d')!;
+                const sorted2 = [...frameLinks].sort((a,b) => b.z - a.z);
+                for (const l of sorted2) strokeLink(ctx2, l, R, half);
+
+                const savedOS      = webOSRef.current;
+                const savedDrawn   = lastDrawnRef.current;
+                const savedRebuild = needsRebuild.current;
+                webOSRef.current     = tempOS;
+                lastDrawnRef.current = frameLinks.length;
+                needsRebuild.current = false;
+
+                drawFrame(offscreen, frameT);
+
+                webOSRef.current     = savedOS;
+                lastDrawnRef.current = savedDrawn;
+                needsRebuild.current = savedRebuild;
+
+                // Capture frame
+                const dataUrl  = offscreen.toDataURL('image/png', 1.0);
+                const fileName = `neural_web_frame_${String(f).padStart(6, '0')}.png`;
+
+                if (dirHandle) {
+                    const fh  = await dirHandle.getFileHandle(fileName, { create: true });
+                    const writable = await fh.createWritable();
+                    const b64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+                    const bin = atob(b64);
+                    const bytes = new Uint8Array(bin.length);
+                    for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+                    await writable.write(bytes);
+                    await writable.close();
+                } else if (zip) {
+                    zip.file(fileName, dataUrl.replace(/^data:image\/png;base64,/, ''), { base64: true });
+                }
+
+                if (f % 4 === 0) {
+                    setExportPct(Math.round((f / totalFrames) * 100));
+                    await new Promise(r => setTimeout(r, 0));
+                }
+            }
+
+            // Finalise ZIP if that path was used
+            if (zip && !dirHandle) {
+                const blob = await zip.generateAsync({ type: 'blob' });
+                saveAs(blob, `neural_web_${totalFrames}frames_${fps}fps.zip`);
+            }
+
+        } catch(e) {
+            console.error('Export sequence failed', e);
+        } finally {
+            // Restore live state
+            linksRef.current = [];
+            needsRebuild.current = true;
+            addLinks(Math.max(startTime, lastTimeRef.current - 3000), lastTimeRef.current);
+            setIsExporting(false);
+            setExportPct(0);
+        }
+    }, [addLinks, bounds, drawFrame, endTime, exportResolution,
+        neuronArr, neuronMap, sortedSpikes, startTime]);
+
+    useImperativeHandle(ref, () => ({ exportPNG }));
+
+    const btnStyle: React.CSSProperties = {
+        fontFamily: 'var(--font-mono)', fontSize: '11px', letterSpacing: '0.08em',
+        padding: '6px 14px', background: 'transparent',
+        border: '1px solid var(--color-border-light)',
+        color: 'var(--color-text-primary)', cursor: 'pointer', textTransform: 'uppercase',
+    };
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <canvas
+                ref={canvasRef}
+                width={width} height={height}
+                style={{ width: '100%', maxWidth: width, aspectRatio: '1/1', display: 'block', background: '#000' }}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+                <button style={btnStyle} onClick={exportPNG}>
+                    Export Frame PNG
+                </button>
+                <button style={btnStyle} onClick={exportSequence} disabled={isExporting}>
+                    {isExporting ? `Exporting ${exportPct}%…` : 'Export Sequence (ZIP)'}
+                </button>
+            </div>
+        </div>
+    );
+});
+
+NeuralWebGraph.displayName = 'NeuralWebGraph';
+export { NeuralWebGraph };

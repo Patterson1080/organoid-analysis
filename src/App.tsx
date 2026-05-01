@@ -10,6 +10,7 @@ import { RealTimeGraph } from './components/RealTimeGraph';
 import PCA3D from './components/PCA3D';
 import { HypergraphsPanel } from './components/HypergraphsPanel';
 import { CircularEventGraph } from './components/CircularEventGraph';
+import { NeuralWebGraph } from './components/NeuralWebGraph';
 
 import { Neuron, SpikeEvent } from './types';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
@@ -55,6 +56,7 @@ function App() {
     const [showHypergraphs, setShowHypergraphs] = useState(false);
     const [showCircularGraph, setShowCircularGraph] = useState(false);
     const [showRegionsGraph, setShowRegionsGraph] = useState(false);
+    const [showNeuralWeb, setShowNeuralWeb] = useState(false);
 
 
     const allSpikesRef = useRef<SpikeEvent[]>([]);
@@ -79,6 +81,8 @@ function App() {
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [lastOscMessage, setLastOscMessage] = useState<{ address: string, args: any[] } | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
+    const serialWsRef = useRef<WebSocket | null>(null);
+    const neuronBoundsRef = useRef({ minX: 0, maxX: 1, minY: 0, maxY: 1 });
 
     // Sound State
     const [soundEnabled, setSoundEnabled] = useState(false);
@@ -102,6 +106,7 @@ function App() {
 
     const playbackTimeRef = useRef(0);
     const lastUiUpdateRef = useRef(0);
+    const isManuallyPausedRef = useRef(false);
 
     // Sync ref with state when state changes (e.g. user scrubbing)
     useEffect(() => {
@@ -256,6 +261,48 @@ function App() {
         };
     }, []); // Run once on mount
 
+    // Serial WS Initial Connection
+    useEffect(() => {
+        let isMounted = true;
+        let reconnectTimeout: ReturnType<typeof setTimeout>;
+        
+        const connectSerialWs = () => {
+            if (!isMounted) return;
+            if (serialWsRef.current && (serialWsRef.current.readyState === WebSocket.OPEN || serialWsRef.current.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
+            try {
+                const ws = new WebSocket('ws://127.0.0.1:8081');
+                ws.onopen = () => console.log('Serial WS: Connected');
+                ws.onerror = (e) => console.error('Serial WS Error');
+                ws.onclose = () => {
+                    console.log('Serial WS: Closed, retrying in 2s...');
+                    serialWsRef.current = null;
+                    if (isMounted) {
+                        reconnectTimeout = setTimeout(connectSerialWs, 2000);
+                    }
+                };
+                serialWsRef.current = ws;
+            } catch (e) {
+                console.error('Serial WS Setup Error', e);
+            }
+        };
+
+        const timeoutId = setTimeout(() => {
+            if (isMounted) connectSerialWs();
+        }, 150);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timeoutId);
+            clearTimeout(reconnectTimeout);
+            if (serialWsRef.current) {
+                serialWsRef.current.close();
+                serialWsRef.current = null;
+            }
+        };
+    }, []);
+
     // Update OSC Config when changed
     useEffect(() => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -271,6 +318,16 @@ function App() {
     }, [oscInPort, oscOutIp, oscOutPort]);
 
     const handleNeuronsLoaded = (loadedNeurons: Neuron[]) => {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        loadedNeurons.forEach(n => {
+            if (n.x < minX) minX = n.x;
+            if (n.x > maxX) maxX = n.x;
+            if (n.y < minY) minY = n.y;
+            if (n.y > maxY) maxY = n.y;
+        });
+        if (minX !== Infinity) {
+            neuronBoundsRef.current = { minX, maxX, minY, maxY };
+        }
         setNeurons(loadedNeurons);
         setShowOrganoid(true);
     };
@@ -608,6 +665,44 @@ function App() {
                 }
                 lastPlaybackTimeRef.current = next;
 
+                // Serial Arduino Output
+                if (serialWsRef.current && serialWsRef.current.readyState === WebSocket.OPEN) {
+                    const uniqueSpikingNeurons = new Set(spikesInFrame.map(s => s.neuron_id)).size;
+                    const isBurst = uniqueSpikingNeurons > 5;
+                    
+                    const { minX, maxX, minY, maxY } = neuronBoundsRef.current;
+                    const rangeX = maxX - minX || 1;
+                    const rangeY = maxY - minY || 1;
+                    
+                    let firings = [];
+                    if (isBurst) {
+                        // Send all correlating neurons for the geometric pattern
+                        firings = spikesInFrame.map(s => {
+                            const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
+                            if (n) {
+                                const normX = (n.x - minX) / rangeX;
+                                const normY = (n.y - minY) / rangeY;
+                                return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
+                            }
+                            return null;
+                        }).filter(Boolean);
+                    } else {
+                        // Send only recent firings for layer 1
+                        firings = recentFiringNeuronsRef.current.map(n => {
+                            const normX = (n.x - minX) / rangeX;
+                            const normY = (n.y - minY) / rangeY;
+                            return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
+                        });
+                    }
+
+                    if (isBurst || firings.length > 0) {
+                        serialWsRef.current.send(JSON.stringify({
+                            type: 'SERIAL_SYNC',
+                            payload: { isBurst, firings }
+                        }));
+                    }
+                }
+
                 // Send OSC output (current row index + neuron coords)
                 if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
                     const rowIndex = Math.floor(next); // Row = time in ms
@@ -885,6 +980,14 @@ function App() {
                                         {showRegionsGraph ? '■ Hide' : '▶'} NEURAL REGIONS
                                     </button>
                                 )}
+                                {allSpikesRef.current.length > 0 && (
+                                    <button
+                                        className={`btn ${showNeuralWeb ? 'active' : ''}`}
+                                        onClick={() => setShowNeuralWeb(!showNeuralWeb)}
+                                    >
+                                        {showNeuralWeb ? '■ Hide' : '▶'} NEURAL WEB
+                                    </button>
+                                )}
 
                             </div>
 
@@ -978,6 +1081,23 @@ function App() {
                                         onClick={() => setIsTransparent(!isTransparent)}
                                     >
                                         {isTransparent ? 'Transparent (Spout Ready)' : 'Standard Black'}
+                                    </button>
+                                </div>
+
+                                {/* Hardware Controls */}
+                                <div className="flex flex-col gap-sm" style={{ marginTop: 'var(--space-md)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-md)' }}>
+                                    <label className="data-label">Hardware</label>
+                                    <button
+                                        className="btn btn-primary"
+                                        onClick={() => {
+                                            if (serialWsRef.current && serialWsRef.current.readyState === WebSocket.OPEN) {
+                                                serialWsRef.current.send(JSON.stringify({ type: 'TEST' }));
+                                            } else {
+                                                console.error("Serial WS not connected");
+                                            }
+                                        }}
+                                    >
+                                        TEST LEDs
                                     </button>
                                 </div>
 
@@ -1167,7 +1287,95 @@ function App() {
                                 exportResolution={2048}
                                 targetDuration={targetDuration}
                                 mode="topology"
-                                showZoomWindow={true}
+                                onCenterTap={() => {
+                                    isManuallyPausedRef.current = !isManuallyPausedRef.current;
+                                    setIsPlaying(!isManuallyPausedRef.current);
+                                }}
+                                onTimeScrub={(t) => {
+                                    const prev = playbackTimeRef.current;
+                                    const start = Math.min(prev, t);
+                                    const end = Math.max(prev, t);
+                                    const scrubSpikes = allSpikesRef.current.filter(
+                                        s => s.timestamp_ms > start && s.timestamp_ms <= end
+                                    );
+                                    
+                                    if (scrubSpikes.length > 0) {
+                                        scrubSpikes.forEach(s => {
+                                            const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
+                                            if (n) recentFiringNeuronsRef.current.push(n);
+                                        });
+                                        if (recentFiringNeuronsRef.current.length > 5) {
+                                            recentFiringNeuronsRef.current = recentFiringNeuronsRef.current.slice(-5);
+                                        }
+
+                                        if (soundEnabled) {
+                                            playMultipleClicks(scrubSpikes.length, 10);
+                                            const uniqueNeurons = new Set(scrubSpikes.map(s => s.neuron_id)).size;
+                                            if (uniqueNeurons >= burstThreshold) {
+                                                const timeSinceLastBurst = Math.abs(t - lastBurstTimeRef.current);
+                                                if (timeSinceLastBurst > 200) { 
+                                                    playBassPulse(uniqueNeurons / burstThreshold);
+                                                    lastBurstTimeRef.current = t;
+                                                }
+                                            }
+                                        }
+
+                                        if (serialWsRef.current && serialWsRef.current.readyState === WebSocket.OPEN) {
+                                            const uniqueSpikingNeurons = new Set(scrubSpikes.map(s => s.neuron_id)).size;
+                                            const isBurst = uniqueSpikingNeurons > 5;
+                                            const { minX, maxX, minY, maxY } = neuronBoundsRef.current;
+                                            const rangeX = maxX - minX || 1;
+                                            const rangeY = maxY - minY || 1;
+                                            let firings = [];
+                                            if (isBurst) {
+                                                firings = scrubSpikes.map(s => {
+                                                    const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
+                                                    if (n) {
+                                                        const normX = (n.x - minX) / rangeX;
+                                                        const normY = (n.y - minY) / rangeY;
+                                                        return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
+                                                    }
+                                                    return null;
+                                                }).filter(Boolean);
+                                            } else {
+                                                firings = recentFiringNeuronsRef.current.map(n => {
+                                                    const normX = (n.x - minX) / rangeX;
+                                                    const normY = (n.y - minY) / rangeY;
+                                                    return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
+                                                });
+                                            }
+                                            if (isBurst || firings.length > 0) {
+                                                serialWsRef.current.send(JSON.stringify({
+                                                    type: 'SERIAL_SYNC',
+                                                    payload: { isBurst, firings }
+                                                }));
+                                            }
+                                        }
+                                    }
+
+                                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                                        wsRef.current.send(JSON.stringify({
+                                            type: 'OSC_BUNDLE',
+                                            payload: {
+                                                time: Math.floor(t),
+                                                neurons: recentFiringNeuronsRef.current.map(n => ({ x: n.x, y: n.y }))
+                                            }
+                                        }));
+                                    }
+
+                                    setPlaybackTime(t);
+                                    playbackTimeRef.current = t;
+                                    lastPlaybackTimeRef.current = t;
+                                }}
+                                onScrubStateChange={(isScrubbing) => {
+                                    if (isScrubbing) {
+                                        setIsPlaying(false);
+                                    } else {
+                                        if (!isManuallyPausedRef.current) {
+                                            setIsPlaying(true);
+                                        }
+                                    }
+                                }}
                             />
                         </div>
                     )}
@@ -1185,10 +1393,114 @@ function App() {
                                 mode="regions"
                                 showZoomWindow={true}
                                 title="Neural_Regions_V1.0"
+                                onCenterTap={() => {
+                                    isManuallyPausedRef.current = !isManuallyPausedRef.current;
+                                    setIsPlaying(!isManuallyPausedRef.current);
+                                }}
+                                onTimeScrub={(t) => {
+                                    const prev = playbackTimeRef.current;
+                                    const start = Math.min(prev, t);
+                                    const end = Math.max(prev, t);
+                                    const scrubSpikes = allSpikesRef.current.filter(
+                                        s => s.timestamp_ms > start && s.timestamp_ms <= end
+                                    );
+                                    
+                                    if (scrubSpikes.length > 0) {
+                                        scrubSpikes.forEach(s => {
+                                            const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
+                                            if (n) recentFiringNeuronsRef.current.push(n);
+                                        });
+                                        if (recentFiringNeuronsRef.current.length > 5) {
+                                            recentFiringNeuronsRef.current = recentFiringNeuronsRef.current.slice(-5);
+                                        }
+
+                                        if (soundEnabled) {
+                                            playMultipleClicks(scrubSpikes.length, 10);
+                                            const uniqueNeurons = new Set(scrubSpikes.map(s => s.neuron_id)).size;
+                                            if (uniqueNeurons >= burstThreshold) {
+                                                const timeSinceLastBurst = Math.abs(t - lastBurstTimeRef.current);
+                                                if (timeSinceLastBurst > 200) { 
+                                                    playBassPulse(uniqueNeurons / burstThreshold);
+                                                    lastBurstTimeRef.current = t;
+                                                }
+                                            }
+                                        }
+
+                                        if (serialWsRef.current && serialWsRef.current.readyState === WebSocket.OPEN) {
+                                            const uniqueSpikingNeurons = new Set(scrubSpikes.map(s => s.neuron_id)).size;
+                                            const isBurst = uniqueSpikingNeurons > 5;
+                                            const { minX, maxX, minY, maxY } = neuronBoundsRef.current;
+                                            const rangeX = maxX - minX || 1;
+                                            const rangeY = maxY - minY || 1;
+                                            let firings = [];
+                                            if (isBurst) {
+                                                firings = scrubSpikes.map(s => {
+                                                    const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
+                                                    if (n) {
+                                                        const normX = (n.x - minX) / rangeX;
+                                                        const normY = (n.y - minY) / rangeY;
+                                                        return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
+                                                    }
+                                                    return null;
+                                                }).filter(Boolean);
+                                            } else {
+                                                firings = recentFiringNeuronsRef.current.map(n => {
+                                                    const normX = (n.x - minX) / rangeX;
+                                                    const normY = (n.y - minY) / rangeY;
+                                                    return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
+                                                });
+                                            }
+                                            if (isBurst || firings.length > 0) {
+                                                serialWsRef.current.send(JSON.stringify({
+                                                    type: 'SERIAL_SYNC',
+                                                    payload: { isBurst, firings }
+                                                }));
+                                            }
+                                        }
+                                    }
+
+                                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                                        wsRef.current.send(JSON.stringify({
+                                            type: 'OSC_BUNDLE',
+                                            payload: {
+                                                time: Math.floor(t),
+                                                neurons: recentFiringNeuronsRef.current.map(n => ({ x: n.x, y: n.y }))
+                                            }
+                                        }));
+                                    }
+
+                                    setPlaybackTime(t);
+                                    playbackTimeRef.current = t;
+                                    lastPlaybackTimeRef.current = t;
+                                onScrubStateChange={(isScrubbing) => {
+                                    if (isScrubbing) {
+                                        setIsPlaying(false);
+                                    } else {
+                                        if (!isManuallyPausedRef.current) {
+                                            setIsPlaying(true);
+                                        }
+                                    }
+                                }}
                             />
                         </div>
                     )}
 
+
+                    {showNeuralWeb && allSpikesRef.current.length > 0 && (
+                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                            <h2>Neural Web (Lissajous · Time Cube)</h2>
+                            <NeuralWebGraph
+                                spikes={allSpikesRef.current}
+                                neurons={neurons}
+                                currentTime={playbackTime}
+                                startTime={startTime}
+                                endTime={endTime}
+                                width={1200}
+                                height={1200}
+                                exportResolution={2048}
+                            />
+                        </div>
+                    )}
 
                     {!showOrganoid && !showSpikeAnalysis && !showPCA && !showRealTimeGraph && !showHypergraphs && (
                         <div className="grid-cell" style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

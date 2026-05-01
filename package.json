@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "server": "node server/osc-bridge.js",
+    "server": "concurrently \"node server/osc-bridge.js\" \"node server/serial-bridge.js\"",
     "start": "concurrently \"npm run server\" \"npm run dev\"",
     "build": "tsc && vite build",
     "preview": "vite preview",
@@ -51,6 +51,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "recharts": "^2.10.3",
+    "serialport": "^13.0.0",
     "three": "^0.165.0",
     "ws": "^8.18.3"
   },

@@ -1,6 +1,69 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Neuron, SpikeEvent } from '../types';
 import { saveAs } from 'file-saver';
+
+// --- Detached Window Portal ---
+const DetachedWindow = ({ children, title, onClose }: { children: React.ReactNode, title: string, onClose: () => void }) => {
+    const [container, setContainer] = useState<HTMLDivElement | null>(null);
+    const onCloseRef = useRef(onClose);
+
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
+
+    useEffect(() => {
+        const w = window.open('', '', 'width=1920,height=1920');
+        if (!w) {
+            alert('Popup blocked. Please allow popups for this site to detach the graph.');
+            onCloseRef.current();
+            return;
+        }
+
+        w.document.title = title || 'Detached Window';
+
+        // Copy all stylesheets from main window
+        const styles = document.querySelectorAll('style, link[rel="stylesheet"]');
+        styles.forEach(style => {
+            w.document.head.appendChild(style.cloneNode(true));
+        });
+
+        // Set matching background
+        w.document.body.style.backgroundColor = '#000';
+        w.document.body.style.color = '#fff';
+        w.document.body.style.margin = '0';
+        w.document.body.style.padding = '0';
+
+        const rootDiv = w.document.createElement('div');
+        rootDiv.style.width = '100vw';
+        rootDiv.style.height = '100vh';
+        rootDiv.style.display = 'flex';
+        rootDiv.style.flexDirection = 'column';
+        rootDiv.style.justifyContent = 'center';
+        rootDiv.style.alignItems = 'center';
+        rootDiv.style.boxSizing = 'border-box';
+        rootDiv.style.overflow = 'hidden';
+        w.document.body.appendChild(rootDiv);
+
+        setContainer(rootDiv);
+
+        let isClosingProgrammatically = false;
+
+        w.addEventListener('beforeunload', () => {
+            if (!isClosingProgrammatically) {
+                onCloseRef.current();
+            }
+        });
+
+        return () => {
+            isClosingProgrammatically = true;
+            w.close();
+        };
+    }, []); // Empty dependency array so it only runs once on mount
+
+    if (!container) return null;
+    return createPortal(children, container);
+};
 
 interface CircularEventGraphProps {
     spikes: SpikeEvent[];
@@ -12,7 +75,9 @@ interface CircularEventGraphProps {
     targetDuration?: number; // seconds, for sequence export
     mode?: 'topology' | 'regions'; // 'topology' = main graph, 'regions' = cluster-arc variant
     showZoomWindow?: boolean;      // rotating clock-index zoom overlay
-    title?: string;                // overrides HUD title
+    onTimeScrub?: (newTime: number) => void;
+    onScrubStateChange?: (isScrubbing: boolean) => void;
+    onCenterTap?: () => void;
 }
 
 // --- Color helper: electric blue → bright red intensity gradient ---
@@ -20,7 +85,7 @@ interface CircularEventGraphProps {
 // low  (0.0): electric blue  ( 30, 150, 255)
 // mid  (0.5): vivid magenta  (220,  60, 200)
 // high (1.0): bright red     (255,  30,  30)
-function activityColor(activity: number, alpha: number): string {
+function activityColor(activity: number, alpha: number, whiter: boolean = false): string {
     const a = Math.max(0, Math.min(1, activity));
     let r: number, g: number, b: number;
     if (a < 0.5) {
@@ -33,6 +98,11 @@ function activityColor(activity: number, alpha: number): string {
         r = Math.round(220 + t * (255 - 220));
         g = Math.round(60  + t * (30  -  60));
         b = Math.round(200 + t * (30  - 200));
+    }
+    if (whiter) {
+        r = Math.round(r + (255 - r) * 0.75);
+        g = Math.round(g + (255 - g) * 0.75);
+        b = Math.round(b + (255 - b) * 0.75);
     }
     return `rgba(${r},${g},${b},${alpha})`;
 }
@@ -118,17 +188,25 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
     mode = 'topology',
     showZoomWindow = true,
     title,
+    onTimeScrub,
+    onScrubStateChange,
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isExporting, setIsExporting] = useState(false);
     const [exportProgress, setExportProgress] = useState(0);
+    const [isDetached, setIsDetached] = useState(false);
+    
+    // Scrubbing state
+    const scrubRef = useRef({ active: false, lastAngle: 0 });
+
 
     // Accumulate spike counts per neuron
     const spikeCountsRef = useRef<Map<number, number>>(new Map());
     const lastTimeRef = useRef(0);
 
     // Active connections with fade
-    const activeLinksRef = useRef<{ sourceId: number; targetId: number; time: number; strength: number }[]>([]);
+    type ResolvedGeometry = { id: number, cx: number, cy: number, ux: number, uy: number, angle: number, isBackbone: boolean, textAngle: number };
+    const activeLinksRef = useRef<{ sourceId: number; targetId: number; time: number; strength: number; g1: ResolvedGeometry; g2: ResolvedGeometry }[]>([]);
 
     // Firing rate history for burst detection
     const firingHistoryRef = useRef<{ time: number; count: number }[]>([]);
@@ -146,6 +224,61 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
 
     // Animation time for smooth transitions
     const animTimeRef = useRef(0);
+
+    const maxNeuronId = useMemo(() =>
+        neurons.length > 0 ? Math.max(...neurons.map(n => n.neuron_id)) : 1024
+        , [neurons]);
+
+    // Sort neurons by ID for consistent perimeter placement
+    const sortedNeurons = useMemo(() =>
+        [...neurons].sort((a, b) => a.neuron_id - b.neuron_id)
+        , [neurons]);
+
+    // Spatial bounding box for normalizing x,y into the inner map circle
+    const spatialBounds = useMemo(() => {
+        if (neurons.length === 0) return { minX: 0, maxX: 1, minY: 0, maxY: 1 };
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const n of neurons) {
+            if (n.x < minX) minX = n.x;
+            if (n.x > maxX) maxX = n.x;
+            if (n.y < minY) minY = n.y;
+            if (n.y > maxY) maxY = n.y;
+        }
+        return { minX, maxX, minY, maxY };
+    }, [neurons]);
+
+    // Pre-computed per-neuron geometry in UNIT space
+    const neuronGeometry = useMemo(() => {
+        if (neurons.length === 0) return [];
+        const rangeX = (spatialBounds.maxX - spatialBounds.minX) || 1;
+        const rangeY = (spatialBounds.maxY - spatialBounds.minY) || 1;
+        return sortedNeurons.map(n => {
+            const angle = (n.neuron_id / (maxNeuronId + 1)) * 2 * Math.PI - Math.PI / 2;
+            const cx = Math.cos(angle);
+            const cy = Math.sin(angle);
+            const ux = ((n.x - spatialBounds.minX) / rangeX) * 2 - 1;
+            const uy = ((n.y - spatialBounds.minY) / rangeY) * 2 - 1;
+            let textAngle = angle + Math.PI / 2;
+            if (angle > 0 && angle < Math.PI) textAngle += Math.PI;
+            return {
+                id: n.neuron_id,
+                isBackbone: !!n.is_backbone,
+                angle,
+                cx,
+                cy,
+                ux,
+                uy,
+                textAngle,
+            };
+        });
+    }, [sortedNeurons, maxNeuronId, spatialBounds, neurons.length]);
+
+    // O(1) lookup of geometry by neuron id
+    const geometryMap = useMemo(() => {
+        const m = new Map<number, typeof neuronGeometry[number]>();
+        neuronGeometry.forEach(g => m.set(g.id, g));
+        return m;
+    }, [neuronGeometry]);
 
     useEffect(() => {
         if (currentTime < lastTimeRef.current) {
@@ -174,17 +307,24 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
             // processing all accumulated links × symmetry copies.
             const recentIds = [...new Set(newSpikes.map(s => s.neuron_id))];
             if (recentIds.length > 1) {
-                const maxPairs = recentIds.length > 30 ? 60 : 90;
+                // Aggressively cap pairs generated per frame during bursts
+                const maxPairs = recentIds.length > 30 ? 15 : 30;
                 let pairCount = 0;
                 for (let i = 0; i < recentIds.length && pairCount < maxPairs; i++) {
                     for (let j = i + 1; j < recentIds.length && pairCount < maxPairs; j++) {
-                        activeLinksRef.current.push({
-                            sourceId: recentIds[i],
-                            targetId: recentIds[j],
-                            time: currentTime,
-                            strength: Math.min(1, recentIds.length / 20),
-                        });
-                        pairCount++;
+                        const g1 = geometryMap.get(recentIds[i]);
+                        const g2 = geometryMap.get(recentIds[j]);
+                        if (g1 && g2) {
+                            activeLinksRef.current.push({
+                                sourceId: recentIds[i],
+                                targetId: recentIds[j],
+                                time: currentTime,
+                                strength: Math.min(1, recentIds.length / 20),
+                                g1,
+                                g2
+                            });
+                            pairCount++;
+                        }
                     }
                 }
             }
@@ -247,72 +387,21 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
             }
         }
 
-        // Fade out old links — longer fade for denser look (1200ms)
-        const fadeLimit = 1200;
+        // GPU Fill-rate protection: 1920x1920 canvas rasterization struggles with >1000 thick anti-aliased curves.
+        // Symmetry multiplies lines by up to 9x, so we must drastically cut the base lines.
+        const isSym = symmetryRef.current.active;
+        const maxLinks = isSym ? 150 : 350;
+        const fadeLimit = isSym ? 1000 : 1800; // Let them linger smoothly
+
         activeLinksRef.current = activeLinksRef.current.filter(l => currentTime - l.time < fadeLimit);
 
-        lastTimeRef.current = currentTime;
-    }, [currentTime, spikes]);
-
-    const maxNeuronId = useMemo(() =>
-        neurons.length > 0 ? Math.max(...neurons.map(n => n.neuron_id)) : 1024
-        , [neurons]);
-
-    // Sort neurons by ID for consistent perimeter placement
-    const sortedNeurons = useMemo(() =>
-        [...neurons].sort((a, b) => a.neuron_id - b.neuron_id)
-        , [neurons]);
-
-    // Spatial bounding box for normalizing x,y into the inner map circle
-    const spatialBounds = useMemo(() => {
-        if (neurons.length === 0) return { minX: 0, maxX: 1, minY: 0, maxY: 1 };
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const n of neurons) {
-            if (n.x < minX) minX = n.x;
-            if (n.x > maxX) maxX = n.x;
-            if (n.y < minY) minY = n.y;
-            if (n.y > maxY) maxY = n.y;
+        if (activeLinksRef.current.length > maxLinks) {
+            activeLinksRef.current = activeLinksRef.current.slice(-maxLinks);
         }
-        return { minX, maxX, minY, maxY };
-    }, [neurons]);
 
-    // Pre-computed per-neuron geometry in UNIT space (resolution-independent).
-    // cx/cy are unit directions on the perimeter circle (cos/sin of angle).
-    // ux/uy are unit positions in the inner spatial map (-1..1).
-    // This avoids recomputing trig every frame for every neuron — a major
-    // performance win for 1000+ neuron datasets.
-    const neuronGeometry = useMemo(() => {
-        if (neurons.length === 0) return [];
-        const rangeX = (spatialBounds.maxX - spatialBounds.minX) || 1;
-        const rangeY = (spatialBounds.maxY - spatialBounds.minY) || 1;
-        return sortedNeurons.map(n => {
-            const angle = (n.neuron_id / (maxNeuronId + 1)) * 2 * Math.PI - Math.PI / 2;
-            const cx = Math.cos(angle);
-            const cy = Math.sin(angle);
-            const ux = ((n.x - spatialBounds.minX) / rangeX) * 2 - 1;
-            const uy = ((n.y - spatialBounds.minY) / rangeY) * 2 - 1;
-            // Text rotation for labels along perimeter (flip on bottom half)
-            let textAngle = angle + Math.PI / 2;
-            if (angle > 0 && angle < Math.PI) textAngle += Math.PI;
-            return {
-                id: n.neuron_id,
-                isBackbone: !!n.is_backbone,
-                angle,
-                cx,
-                cy,
-                ux,
-                uy,
-                textAngle,
-            };
-        });
-    }, [sortedNeurons, maxNeuronId, spatialBounds, neurons.length]);
+        lastTimeRef.current = currentTime;
+    }, [currentTime, spikes, geometryMap]);
 
-    // O(1) lookup of geometry by neuron id
-    const geometryMap = useMemo(() => {
-        const m = new Map<number, typeof neuronGeometry[number]>();
-        neuronGeometry.forEach(g => m.set(g.id, g));
-        return m;
-    }, [neuronGeometry]);
 
     const drawFrame = (ctx: CanvasRenderingContext2D, size: number, time: number) => {
         const center = size / 2;
@@ -484,7 +573,7 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
         const symActive = sym.active;
         const symOrder = sym.order;
         const symIntensity = symActive ? sym.intensity : 0;
-        const fadeLimit = 1200;
+        const fadeLimit = symActive ? 1000 : 1800;
 
         // Pre-cache sin/cos for each symmetry rotation so we don't call trig
         // inside the inner loop (links × copies). This is the hot path during bursts.
@@ -502,12 +591,10 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
 
         for (let li = 0; li < links.length; li++) {
             const link = links[li];
-            const g1 = geometryMap.get(link.sourceId);
-            const g2 = geometryMap.get(link.targetId);
-            if (!g1 || !g2) continue;
-
             const age = time - link.time;
             if (age > fadeLimit) continue;
+            
+            const { g1, g2 } = link;
 
             // Pair-level activity drives color bucket
             const c1 = spikeCountsRef.current.get(g1.id) || 0;
@@ -520,6 +607,8 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
             const sp1y = center + g1.uy * mapRadius;
             const sp2x = center + g2.ux * mapRadius;
             const sp2y = center + g2.uy * mapRadius;
+            const cpX = (sp1x + sp2x) / 2;
+            const cpY = (sp1y + sp2y) / 2;
 
             // Perimeter endpoints — primary connection
             const px0 = center + g1.cx * baseRadius;
@@ -529,7 +618,7 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
 
             const p = linkPaths[bucket];
             p.moveTo(px0, py0);
-            p.bezierCurveTo(sp1x, sp1y, sp2x, sp2y, px1, py1);
+            p.quadraticCurveTo(cpX, cpY, px1, py1);
 
             // Symmetry replicas: use pre-cached rotation matrices to avoid trig per link
             if (symActive && symIntensity > 0.05) {
@@ -559,14 +648,16 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
         ctx.lineWidth = Math.max(0.3, 0.8 * scale);
         for (let k = 0; k < LINK_BUCKETS; k++) {
             const midActivity = (k + 0.5) / LINK_BUCKETS;
-            ctx.strokeStyle = activityColor(midActivity, 0.12 + midActivity * 0.28);
+            // Increased alpha for brighter curves
+            ctx.strokeStyle = activityColor(midActivity, 0.25 + midActivity * 0.45, true);
             ctx.stroke(linkPaths[k]);
         }
         if (symActive) {
             ctx.lineWidth = Math.max(0.3, 0.6 * scale);
             for (let k = 0; k < LINK_BUCKETS; k++) {
                 const midActivity = (k + 0.5) / LINK_BUCKETS;
-                ctx.strokeStyle = activityColor(midActivity, 0.08 * symIntensity);
+                // Significantly brighter symmetry curves
+                ctx.strokeStyle = activityColor(midActivity, 0.2 * symIntensity + 0.1, true);
                 ctx.stroke(symLinkPaths[k]);
             }
         }
@@ -574,27 +665,22 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
 
         // ============================================================
         // PASS 4: Connection endpoints (glowing dots) — batched
+        // O(Active Neurons) instead of O(Links)
         // ============================================================
         ctx.save();
         const endpointPath = new Path2D();
-        const drawnEndpoints = new Set<number>();
         const dotSize = Math.max(1, 2 * scale);
-        for (let li = 0; li < links.length; li++) {
-            const link = links[li];
-            const age = time - link.time;
-            if (age > fadeLimit) continue;
-            const ids = [link.sourceId, link.targetId];
-            for (const id of ids) {
-                if (drawnEndpoints.has(id)) continue;
-                drawnEndpoints.add(id);
-                const g = geometryMap.get(id);
-                if (!g) continue;
+        
+        for (const id of spikeCountsRef.current.keys()) {
+            const g = geometryMap.get(id);
+            if (g) {
                 const x = center + g.cx * baseRadius;
                 const y = center + g.cy * baseRadius;
                 endpointPath.moveTo(x + dotSize, y);
                 endpointPath.arc(x, y, dotSize, 0, Math.PI * 2);
             }
         }
+        
         ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
         ctx.fill(endpointPath);
         ctx.restore();
@@ -825,13 +911,13 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
             ctx.fill();
             ctx.restore();
 
-            // Timestamp arc text — rendered INSIDE the wedge, near its outer edge.
-            // This keeps the label contained within the red clock-index frame.
+            // Timestamp arc text — rendered INSIDE the wedge, near its inner edge (where the dots are).
+            // This keeps the label contained within the red clock-index frame but close to the inner circle.
             const frameNumber = Math.floor((time / 1000) * 30);
-            const stampText = `T:${Math.round(time)}ms  F:${frameNumber}`;
+            const stampText = `T:${Math.round(time)}ms  F:${frameNumber}  L:${activeLinksRef.current.length}`;
             const stampFontSize = Math.max(6, 7.5 * scale);
-            // Place at outerR minus one font-height — just inside the outer arc of the frame
-            const stampRadius = outerR - stampFontSize * 1.1;
+            // Place at innerR minus 1.5 font-heights (radially 'under' the wedge frame)
+            const stampRadius = innerR - stampFontSize * 1.5;
             const stampArc = textArcAngle(stampText, stampRadius, stampFontSize);
             const stampStartAngle = sweepAngle - stampArc / 2;
             drawCurvedText(stampText, stampRadius, stampStartAngle, 'rgba(255, 80, 80, 0.92)', stampFontSize);
@@ -841,55 +927,57 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
         // PASS 7: HUD / Metadata — curved text along outer perimeter
         // (drawCurvedText is defined at the top of drawFrame)
         // ============================================================
-        const hudFontSize = Math.max(8, 11 * scale);
-        const hudRadius = outerRingRadius + 16 * scale; // outside the outer ring
+        if (!isDetached) {
+            const hudFontSize = Math.max(8, 11 * scale);
+            const hudRadius = outerRingRadius + 16 * scale; // outside the outer ring
 
-        // Top arc: title
-        const titleText = title
-            ? title.toUpperCase()
-            : (mode === 'regions' ? 'NEURAL_REGIONS_V1.0' : 'NEURAL_TOPOLOGY_V1.0');
-        const titleCharWidth = hudFontSize * 0.6;
-        const titleArcLen = titleText.length * titleCharWidth;
-        const titleArcAngle = titleArcLen / hudRadius;
-        drawCurvedText(
-            titleText, hudRadius,
-            -Math.PI / 2 - titleArcAngle / 2, // centered at top
-            '#00AAFF', hudFontSize
-        );
+            // Top arc: title
+            const titleText = title
+                ? title.toUpperCase()
+                : (mode === 'regions' ? 'NEURAL_REGIONS_V1.0' : 'NEURAL_TOPOLOGY_V1.0');
+            const titleCharWidth = hudFontSize * 0.6;
+            const titleArcLen = titleText.length * titleCharWidth;
+            const titleArcAngle = titleArcLen / hudRadius;
+            drawCurvedText(
+                titleText, hudRadius,
+                -Math.PI / 2 - titleArcAngle / 2, // centered at top
+                '#00AAFF', hudFontSize
+            );
 
-        // Upper-right arc: data time
-        const timeText = `DATA_TIME:${Math.round(time)}ms`;
-        drawCurvedText(timeText, hudRadius, -0.1, 'rgba(255,255,255,0.7)', hudFontSize * 0.85);
+            // Upper-right arc: data time
+            const timeText = `DATA_TIME:${Math.round(time)}ms`;
+            drawCurvedText(timeText, hudRadius, -0.1, 'rgba(255,255,255,0.7)', hudFontSize * 0.85);
 
-        // Right arc: neuron count
-        const neuronText = `NEURONS:${neurons.length}`;
-        drawCurvedText(neuronText, hudRadius, 0.55, 'rgba(255,255,255,0.7)', hudFontSize * 0.85);
+            // Right arc: neuron count
+            const neuronText = `NEURONS:${neurons.length}`;
+            drawCurvedText(neuronText, hudRadius, 0.55, 'rgba(255,255,255,0.7)', hudFontSize * 0.85);
 
-        // Lower-right arc: link count
-        const linkText = `LINKS:${activeLinksRef.current.length}`;
-        drawCurvedText(linkText, hudRadius, 1.1, 'rgba(255,255,255,0.7)', hudFontSize * 0.85);
+            // Lower-right arc: link count
+            const linkText = `LINKS:${activeLinksRef.current.length}`;
+            drawCurvedText(linkText, hudRadius, 1.1, 'rgba(255,255,255,0.7)', hudFontSize * 0.85);
 
-        // Symmetry mode indicator — left x-axis (opposite DATA_TIME on the right)
-        if (sym.active) {
-            const symText = `D${sym.order}_SYMMETRY[${Math.round(sym.intensity * 100)}%]` +
-                (sym.breakAmount > 0 ? `_BREAKING[${Math.round(sym.breakAmount * 100)}%]` : '');
-            const symAlpha = 0.5 + Math.sin(animTimeRef.current * 3) * 0.3;
-            const symCharWidth = hudFontSize * 0.85 * 0.6;
-            const symArcAngle = (symText.length * symCharWidth) / hudRadius;
-            drawCurvedText(symText, hudRadius, Math.PI - symArcAngle / 2, `rgba(0,200,255,${symAlpha})`, hudFontSize * 0.85);
+            // Symmetry mode indicator — left x-axis (opposite DATA_TIME on the right)
+            if (sym.active) {
+                const symText = `D${sym.order}_SYMMETRY[${Math.round(sym.intensity * 100)}%]` +
+                    (sym.breakAmount > 0 ? `_BREAKING[${Math.round(sym.breakAmount * 100)}%]` : '');
+                const symAlpha = 0.5 + Math.sin(animTimeRef.current * 3) * 0.3;
+                const symCharWidth = hudFontSize * 0.85 * 0.6;
+                const symArcAngle = (symText.length * symCharWidth) / hudRadius;
+                drawCurvedText(symText, hudRadius, Math.PI - symArcAngle / 2, `rgba(0,200,255,${symAlpha})`, hudFontSize * 0.85);
+            }
+
+            // Bottom arc: credits — clockwise, centered at bottom, matching perimeter letter orientation
+            const creditText = 'FIELD-GOLUBITSKY SYMMETRIC CHAOS \u00B7 ORGANOID NEURAL TOPOLOGY';
+            const creditFontSize = hudFontSize * 0.7;
+            const creditCharWidth = creditFontSize * 0.6;
+            const creditArcLen = creditText.length * creditCharWidth;
+            const creditArcAngle = creditArcLen / hudRadius;
+            drawCurvedText(
+                creditText, hudRadius,
+                (1.1 + Math.PI) / 2 - creditArcAngle / 2, // centered between LINKS (1.1) and symmetry (π)
+                'rgba(150,150,150,0.5)', creditFontSize, true
+            );
         }
-
-        // Bottom arc: credits — clockwise, centered at bottom, matching perimeter letter orientation
-        const creditText = 'FIELD-GOLUBITSKY SYMMETRIC CHAOS \u00B7 ORGANOID NEURAL TOPOLOGY';
-        const creditFontSize = hudFontSize * 0.7;
-        const creditCharWidth = creditFontSize * 0.6;
-        const creditArcLen = creditText.length * creditCharWidth;
-        const creditArcAngle = creditArcLen / hudRadius;
-        drawCurvedText(
-            creditText, hudRadius,
-            (1.1 + Math.PI) / 2 - creditArcAngle / 2, // centered between LINKS (1.1) and symmetry (π)
-            'rgba(150,150,150,0.5)', creditFontSize, true
-        );
     };
 
     useEffect(() => {
@@ -1073,11 +1161,108 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
         setExportProgress(0);
     };
 
-    return (
+    const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        if (!canvasRef.current) return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        // Calculate coordinates relative to canvas center
+        const x = e.clientX - rect.left - rect.width / 2;
+        const y = e.clientY - rect.top - rect.height / 2;
+        const radius = Math.sqrt(x * x + y * y);
+        
+        // Map radius to our internal coordinate space
+        const internalRadius = (radius / (rect.width / 2)) * (width / 2);
+        
+        // Only start scrubbing if grabbing the outer ring area
+        if (internalRadius > width * 0.35) {
+            scrubRef.current.active = true;
+            scrubRef.current.lastAngle = Math.atan2(y, x);
+            if (onScrubStateChange) onScrubStateChange(true);
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        } else {
+            // Tapped in the center
+            if (onCenterTap) onCenterTap();
+        }
+    };
+
+    const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        if (!scrubRef.current.active) return;
+        const rect = canvasRef.current!.getBoundingClientRect();
+        const x = e.clientX - rect.left - rect.width / 2;
+        const y = e.clientY - rect.top - rect.height / 2;
+        const currentAngle = Math.atan2(y, x);
+        
+        let deltaAngle = currentAngle - scrubRef.current.lastAngle;
+        
+        // Handle wrap around
+        if (deltaAngle > Math.PI) deltaAngle -= 2 * Math.PI;
+        if (deltaAngle < -Math.PI) deltaAngle += 2 * Math.PI;
+        
+        // 1 full revolution = 12000ms
+        const deltaTime = (deltaAngle / (2 * Math.PI)) * 12000;
+        
+        if (onTimeScrub) {
+            onTimeScrub(currentTime + deltaTime);
+        }
+        
+        scrubRef.current.lastAngle = currentAngle;
+    };
+
+    const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        if (scrubRef.current.active) {
+            scrubRef.current.active = false;
+            if (onScrubStateChange) onScrubStateChange(false);
+            (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        }
+    };
+
+    const scaleFactor = isDetached ? (0.5 / 0.46) : 1;
+    const canvasElement = (
+        <canvas
+            ref={canvasRef}
+            width={width}
+            height={height}
+            style={{ 
+                width: '100%', 
+                height: '100%', 
+                borderRadius: '50%', 
+                touchAction: 'none',
+                transform: `scale(${scaleFactor})`,
+                transformOrigin: 'center center'
+            }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+        />
+    );
+
+    if (isDetached) {
+        return (
+            <>
+                <div style={{ padding: 'var(--space-xl)', textAlign: 'center', border: '1px dashed var(--color-border)', marginTop: 'var(--space-xl)' }}>
+                    <p className="status-text" style={{ marginBottom: 'var(--space-md)' }}>Graph is currently detached to a separate window.</p>
+                    <button className="btn btn-primary" onClick={() => setIsDetached(false)}>
+                        ␡ Reattach Window
+                    </button>
+                </div>
+                <DetachedWindow title="Circular Event Topology" onClose={() => setIsDetached(false)}>
+                    {canvasElement}
+                </DetachedWindow>
+            </>
+        );
+    }
+
+    const graphContent = (
         <div className="circular-graph-container" style={{ position: 'relative', marginTop: 'var(--space-xl)' }}>
-            <h2 style={{ letterSpacing: '0.1em', marginBottom: 'var(--space-md)' }}>CIRCULAR EVENT TOPOLOGY</h2>
+            <div className="flex justify-between items-center" style={{ width: '100%', marginBottom: 'var(--space-md)' }}>
+                <h2 style={{ letterSpacing: '0.1em', margin: 0 }}>CIRCULAR EVENT TOPOLOGY {mode === 'regions' && '(REGIONS)'}</h2>
+                <button className="btn btn-secondary" onClick={() => setIsDetached(true)}>
+                    ⏏ Detach Window
+                </button>
+            </div>
             <div style={{
                 width: '100%',
+                height: 'auto',
                 aspectRatio: '1/1',
                 background: '#000',
                 border: '1px solid var(--color-border)',
@@ -1088,15 +1273,10 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
                 justifyContent: 'center',
                 alignItems: 'center'
             }}>
-                <canvas
-                    ref={canvasRef}
-                    width={width}
-                    height={height}
-                    style={{ width: '100%', height: '100%', borderRadius: '50%' }}
-                />
+                {canvasElement}
             </div>
 
-            <div className="flex gap-md" style={{ marginTop: 'var(--space-md)', flexWrap: 'wrap' }}>
+            <div className="flex gap-md" style={{ marginTop: 'var(--space-md)', flexWrap: 'wrap', width: '100%', justifyContent: 'flex-start' }}>
                 <button
                     className="btn"
                     onClick={handleExportPNG}
@@ -1117,4 +1297,7 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
             </div>
         </div>
     );
+
+    return graphContent;
 };
+

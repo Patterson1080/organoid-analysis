@@ -120,7 +120,13 @@ During large burst events (instantaneous firing rate > 3× baseline), the visual
 - **Symmetry breaking** — as the burst subsides, copies are progressively perturbed with sinusoidal offsets, dissolving perfect symmetry into near-symmetric remnants
 
 **5. Rotating Zoom Window (Clock Index)**
-A thin red annular-sector rotates clockwise around the perimeter, completing one revolution every 12 seconds. It acts as a clock index, framing the currently-sampled arc of neurons. A small red timestamp (`T:9970ms  F:299`) is arc-rendered inside the wedge, following the curvature of the frame.
+A thin red annular-sector rotates clockwise around the perimeter, completing one revolution every 12 seconds. It acts as a clock index, framing the currently-sampled arc of neurons. A small red timestamp (`T:9970ms  F:299  L:54`) is arc-rendered beneath the inner curvature of the frame.
+
+**6. Detached Kiosk Mode**
+The graph can be popped out into a dedicated, borderless 1920x1920 floating window. In this mode, the HUD elements are hidden and the canvas scales mathematically so the inner neural ring perfectly borders the physical edge of the display, designed specifically for circular LED/LCD installations.
+
+**7. Touch Scrubbing (DJ Jog Wheel)**
+The circular graph acts as an interactive jog wheel. Tapping the empty center toggles play/pause without any UI buttons. Grabbing the outer rotating edge allows you to smoothly scrub back and forth through the data timeline, retaining synchronization with OSC outputs and audio synthesis.
 
 ### HUD Overlay
 
@@ -178,9 +184,13 @@ The transport panel uses a unified 4×2 button grid with no gap between rows:
 
 ---
 
-## OSC Bridge
+## External Hardware Integration
 
-The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for receiving live spike data from MEA recording systems. Configure input/output ports and target IP in the UI.
+### OSC Bridge
+The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for receiving live spike data from MEA recording systems, and streaming out current playback state/burst coordinates to external visualizers (e.g. TouchDesigner).
+
+### Serial Hardware Bridge
+A dedicated serial bridge (`server/serial-bridge.js`) connects the web application to physical microcontrollers (e.g., Arduino Uno R4). It transmits structural firing events and high-order burst flags encoded into a compact byte stream, allowing physical LED matrices or fiber optic sculptures to fire in real-time synchrony with the organoid recordings.
 
 ## Spout Output
 
