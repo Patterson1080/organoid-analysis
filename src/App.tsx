@@ -1472,6 +1472,7 @@ function App() {
                                     setPlaybackTime(t);
                                     playbackTimeRef.current = t;
                                     lastPlaybackTimeRef.current = t;
+                                }}
                                 onScrubStateChange={(isScrubbing) => {
                                     if (isScrubbing) {
                                         setIsPlaying(false);
