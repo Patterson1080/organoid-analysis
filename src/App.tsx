@@ -1018,43 +1018,6 @@ function App() {
                                     />
                                 </div>
 
-                                {/* OSC Configuration */}
-                                <div className="flex flex-col gap-sm" style={{ marginTop: 'var(--space-md)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-md)' }}>
-                                    <label className="data-label">OSC Configuration</label>
-                                    <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 'var(--space-sm)' }}>
-                                        <div>
-                                            <label className="data-label" style={{ fontSize: '0.7em' }}>In Port</label>
-                                            <input
-                                                type="text"
-                                                value={oscInPort}
-                                                onChange={e => setOscInPort(e.target.value)}
-                                                style={{ width: '100%', padding: '4px', background: '#111', border: '1px solid #333', color: '#fff', fontSize: '0.8em' }}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="data-label" style={{ fontSize: '0.7em' }}>Out Port</label>
-                                            <input
-                                                type="text"
-                                                value={oscOutPort}
-                                                onChange={e => setOscOutPort(e.target.value)}
-                                                style={{ width: '100%', padding: '4px', background: '#111', border: '1px solid #333', color: '#fff', fontSize: '0.8em' }}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label className="data-label" style={{ fontSize: '0.7em' }}>Out IP (Target)</label>
-                                        <input
-                                            type="text"
-                                            value={oscOutIp}
-                                            onChange={e => setOscOutIp(e.target.value)}
-                                            style={{ width: '100%', padding: '4px', background: '#111', border: '1px solid #333', color: '#fff', fontSize: '0.8em' }}
-                                        />
-                                    </div>
-                                    <div className="status-text" style={{ fontSize: '0.7em', color: wsConnected ? 'var(--color-accent)' : '#666' }}>
-                                        {wsConnected ? `Connected to Bridge` : `Disconnected`}
-                                        {connectionError && <span style={{ color: '#f00' }}> - {connectionError}</span>}
-                                    </div>
-                                </div>
                                 <div className="flex flex-col gap-sm">
                                     <label className="data-label">Trail Length: {trailLength}</label>
                                     <input
@@ -1145,6 +1108,7 @@ function App() {
                                         type="text"
                                         value={oscInPort}
                                         onChange={e => setOscInPort(e.target.value)}
+                                        style={{ width: '100%', padding: '8px', background: '#111', border: '1px solid #333', color: '#fff' }}
                                     />
                                 </div>
                                 <div className="flex flex-col">
@@ -1153,6 +1117,7 @@ function App() {
                                         type="text"
                                         value={oscOutPort}
                                         onChange={e => setOscOutPort(e.target.value)}
+                                        style={{ width: '100%', padding: '8px', background: '#111', border: '1px solid #333', color: '#fff' }}
                                     />
                                 </div>
                             </div>
@@ -1163,6 +1128,7 @@ function App() {
                                     type="text"
                                     value={oscOutIp}
                                     onChange={e => setOscOutIp(e.target.value)}
+                                    style={{ width: '100%', padding: '8px', background: '#111', border: '1px solid #333', color: '#fff' }}
                                 />
                             </div>
 
