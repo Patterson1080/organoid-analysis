@@ -29,3 +29,9 @@ release/
 # Logs
 *.log
 npm-debug.log*
+
+# Local Python install (not part of the project)
+Python311/
+
+# Windows shortcuts
+*.lnk
