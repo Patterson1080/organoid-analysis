@@ -9,11 +9,23 @@ const WS_PORT = 8080;
 
 // State
 let oscServer;
-let oscClient;
+let oscClients = []; // One OSC Client per destination
 let wsServer;
 let oscInPort = DEFAULT_OSC_IN_PORT;
 let oscOutPort = DEFAULT_OSC_OUT_PORT;
 let oscOutIp = DEFAULT_OSC_OUT_IP;
+
+// Output message config. Defaults match the app's current settings
+// (/index, /x1,/y1..., and the /row echo); overridden by the frontend via CONFIG.
+let oscOut = {
+    timeEnabled: true,
+    timeAddress: '/index',
+    neuronsEnabled: true,
+    xPrefix: '/x',
+    yPrefix: '/y',
+    rowEnabled: true,     // echo of incoming /row back out
+    rowAddress: '/row',
+};
 
 // Initialize WebSocket Server
 function startWsServer() {
@@ -77,61 +89,102 @@ function startOscServer(port) {
     }
 }
 
-// Initialize OSC Client (Outbound)
-function updateOscClient(ip, port) {
-    if (oscClient) oscClient.close();
-    oscClient = new Client(ip, port);
-    console.log(`OSC Client ready to send to ${ip}:${port}`);
+// Parse a destination string into { ip, port } entries.
+// Accepts a comma-separated list; each entry may be "ip" or "ip:port".
+// Entries without a port fall back to the shared defaultPort.
+function parseDestinations(ipString, defaultPort) {
+    return String(ipString || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(entry => {
+            const [ip, port] = entry.split(':');
+            const parsedPort = port ? parseInt(port, 10) : defaultPort;
+            return { ip: ip.trim(), port: Number.isFinite(parsedPort) ? parsedPort : defaultPort };
+        });
+}
+
+// Initialize OSC Clients (Outbound) — one per destination
+function updateOscClients(ipString, port) {
+    oscClients.forEach(c => c.close());
+    oscClients = [];
+
+    const destinations = parseDestinations(ipString, port);
+    destinations.forEach(({ ip, port: p }) => {
+        oscClients.push(new Client(ip, p));
+        console.log(`OSC Client ready to send to ${ip}:${p}`);
+    });
+
+    if (oscClients.length === 0) {
+        console.warn('No OSC destinations configured');
+    }
 }
 
 function updateOscConfig(config) {
     console.log('Updating Configuration:', config);
 
-    if (config.inPort && config.inPort !== oscInPort) {
-        oscInPort = config.inPort;
+    // Frontend sends { oscInPort, oscOutPort, oscOutIp }
+    const inPort = config.oscInPort ?? config.inPort;
+    const outPort = config.oscOutPort ?? config.outPort;
+    const outIp = config.oscOutIp ?? config.outIp;
+
+    if (inPort && inPort !== oscInPort) {
+        oscInPort = inPort;
         startOscServer(oscInPort);
     }
 
-    if ((config.outIp && config.outIp !== oscOutIp) || (config.outPort && config.outPort !== oscOutPort)) {
-        oscOutIp = config.outIp || oscOutIp;
-        oscOutPort = config.outPort || oscOutPort;
-        updateOscClient(oscOutIp, oscOutPort);
+    if ((outIp && outIp !== oscOutIp) || (outPort && outPort !== oscOutPort)) {
+        oscOutIp = outIp || oscOutIp;
+        oscOutPort = outPort || oscOutPort;
+        updateOscClients(oscOutIp, oscOutPort);
+    }
+
+    // Output message config (addresses + enable flags). Merge over defaults so
+    // omitted fields keep their current value.
+    if (config.osc && typeof config.osc === 'object') {
+        oscOut = { ...oscOut, ...config.osc };
+        console.log('OSC output config:', oscOut);
     }
 }
 
 function sendOscMessage(value) {
-    if (oscClient) {
-        // Send as /row <value> or /row <val1> <val2> ...
-        const args = Array.isArray(value) ? value : [value];
-        oscClient.send('/row', ...args, (err) => {
+    if (oscClients.length === 0) {
+        console.warn('No OSC clients initialized');
+        return;
+    }
+    if (!oscOut.rowEnabled) return;
+    // Send as <rowAddress> <value> or <rowAddress> <val1> <val2> ...
+    const args = Array.isArray(value) ? value : [value];
+    oscClients.forEach(client => {
+        client.send(oscOut.rowAddress, ...args, (err) => {
             if (err) console.error('OSC Send Error:', err);
         });
-    } else {
-        console.warn('OSC Client not initialized');
-    }
+    });
 }
 
 function sendOscBundle(bundle) {
-    if (oscClient) {
-        console.log('Sending Bundle:', bundle); // Debug Log
+    if (oscClients.length === 0) return;
 
-        // Send Time
-        if (bundle.time !== undefined) {
-            oscClient.send('/time', bundle.time);
+    console.log('Sending Bundle:', bundle); // Debug Log
+
+    oscClients.forEach(client => {
+        // Send Time (row index)
+        if (oscOut.timeEnabled && bundle.time !== undefined) {
+            client.send(oscOut.timeAddress, bundle.time);
         }
 
-        // Send Neurons as /x1, /y1, /x2, /y2 ...
-        if (Array.isArray(bundle.neurons)) {
+        // Send Neurons as /x1, /y1, /x2, /y2 ... (prefixes configurable)
+        if (oscOut.neuronsEnabled && Array.isArray(bundle.neurons)) {
             bundle.neurons.forEach((n, i) => {
                 const idx = i + 1; // 1-based index
-                oscClient.send(`/x${idx}`, n.x);
-                oscClient.send(`/y${idx}`, n.y);
+                client.send(`${oscOut.xPrefix}${idx}`, n.x);
+                client.send(`${oscOut.yPrefix}${idx}`, n.y);
             });
         }
-    }
+    });
 }
 
 // Start everything
 startWsServer();
 startOscServer(oscInPort);
-updateOscClient(oscOutIp, oscOutPort);
+updateOscClients(oscOutIp, oscOutPort);

@@ -77,6 +77,16 @@ function App() {
     const [oscInPort, setOscInPort] = useState('3333');
     const [oscOutIp, setOscOutIp] = useState('127.0.0.1');
     const [oscOutPort, setOscOutPort] = useState('3334');
+
+    // OSC Output message config (addresses + enable toggles).
+    // Defaults reproduce the current output exactly: /time, /x1,/y1..., /row echo.
+    const [oscTimeEnabled, setOscTimeEnabled] = useState(true);
+    const [oscTimeAddress, setOscTimeAddress] = useState('/index');
+    const [oscNeuronsEnabled, setOscNeuronsEnabled] = useState(true);
+    const [oscXPrefix, setOscXPrefix] = useState('/x');
+    const [oscYPrefix, setOscYPrefix] = useState('/y');
+    const [oscRowEnabled, setOscRowEnabled] = useState(true);
+    const [oscRowAddress, setOscRowAddress] = useState('/row');
     const [wsConnected, setWsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [lastOscMessage, setLastOscMessage] = useState<{ address: string, args: any[] } | null>(null);
@@ -137,6 +147,23 @@ function App() {
         }
     }, []);
 
+    // Build the full CONFIG payload (ports, IPs, and output message config).
+    // Shared by the initial send on connect and the live-update effect.
+    const getOscConfigPayload = useCallback(() => ({
+        oscInPort: parseInt(oscInPort),
+        oscOutPort: parseInt(oscOutPort),
+        oscOutIp,
+        osc: {
+            timeEnabled: oscTimeEnabled,
+            timeAddress: oscTimeAddress,
+            neuronsEnabled: oscNeuronsEnabled,
+            xPrefix: oscXPrefix,
+            yPrefix: oscYPrefix,
+            rowEnabled: oscRowEnabled,
+            rowAddress: oscRowAddress,
+        },
+    }), [oscInPort, oscOutPort, oscOutIp, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress]);
+
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // WebSocket Connection Logic
@@ -165,11 +192,7 @@ function App() {
                 // Send initial config
                 ws.send(JSON.stringify({
                     type: 'CONFIG',
-                    payload: {
-                        oscInPort: parseInt(oscInPort),
-                        oscOutPort: parseInt(oscOutPort),
-                        oscOutIp
-                    }
+                    payload: getOscConfigPayload()
                 }));
             };
 
@@ -217,7 +240,7 @@ function App() {
                 connectWs();
             }, 2000);
         }
-    }, [oscInPort, oscOutPort, oscOutIp, handleOscRowInput]);
+    }, [getOscConfigPayload, handleOscRowInput]);
 
     const toggleConnection = useCallback(() => {
         if (wsConnected && wsRef.current) {
@@ -308,14 +331,10 @@ function App() {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
                 type: 'CONFIG',
-                payload: {
-                    oscInPort: parseInt(oscInPort),
-                    oscOutPort: parseInt(oscOutPort),
-                    oscOutIp
-                }
+                payload: getOscConfigPayload()
             }));
         }
-    }, [oscInPort, oscOutIp, oscOutPort]);
+    }, [getOscConfigPayload]);
 
     const handleNeuronsLoaded = (loadedNeurons: Neuron[]) => {
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -1123,13 +1142,74 @@ function App() {
                             </div>
 
                             <div className="flex flex-col">
-                                <label className="data-label">Output IP</label>
+                                <label className="data-label">Output IP(s)</label>
                                 <input
                                     type="text"
                                     value={oscOutIp}
                                     onChange={e => setOscOutIp(e.target.value)}
+                                    placeholder="192.168.1.5, 192.168.1.6:3334"
                                     style={{ width: '100%', padding: '8px', background: '#111', border: '1px solid #333', color: '#fff' }}
                                 />
+                            </div>
+
+                            <div className="flex flex-col gap-sm">
+                                <label className="data-label">Output Messages</label>
+                                <div style={{ fontSize: '0.75em', color: '#888', marginBottom: '4px' }}>
+                                    Toggle what streams out and rename each address. Defaults match the current output.
+                                </div>
+
+                                {/* Row index / time */}
+                                <div className="flex" style={{ alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                    <input type="checkbox" checked={oscTimeEnabled} onChange={e => setOscTimeEnabled(e.target.checked)} />
+                                    <span style={{ fontSize: '0.8em', width: '84px', color: '#ccc' }}>Row index</span>
+                                    <input
+                                        type="text"
+                                        value={oscTimeAddress}
+                                        onChange={e => setOscTimeAddress(e.target.value)}
+                                        placeholder="/index"
+                                        title="sent as <address> <rowIndex>"
+                                        style={{ flex: 1, padding: '6px', background: '#111', border: '1px solid #333', color: '#fff' }}
+                                    />
+                                </div>
+
+                                {/* Neuron X/Y coords */}
+                                <div className="flex" style={{ alignItems: 'center', gap: '8px' }}>
+                                    <input type="checkbox" checked={oscNeuronsEnabled} onChange={e => setOscNeuronsEnabled(e.target.checked)} />
+                                    <span style={{ fontSize: '0.8em', width: '84px', color: '#ccc' }}>Neuron X/Y</span>
+                                    <input
+                                        type="text"
+                                        value={oscXPrefix}
+                                        onChange={e => setOscXPrefix(e.target.value)}
+                                        placeholder="/x"
+                                        title="X prefix — sent per firing neuron as /x1, /x2, ..."
+                                        style={{ flex: 1, padding: '6px', background: '#111', border: '1px solid #333', color: '#fff' }}
+                                    />
+                                    <input
+                                        type="text"
+                                        value={oscYPrefix}
+                                        onChange={e => setOscYPrefix(e.target.value)}
+                                        placeholder="/y"
+                                        title="Y prefix — sent per firing neuron as /y1, /y2, ..."
+                                        style={{ flex: 1, padding: '6px', background: '#111', border: '1px solid #333', color: '#fff' }}
+                                    />
+                                </div>
+                                <div style={{ fontSize: '0.7em', color: '#666', margin: '2px 0 6px 26px' }}>
+                                    Sent per firing neuron: {oscXPrefix}1, {oscYPrefix}1, {oscXPrefix}2, {oscYPrefix}2 …
+                                </div>
+
+                                {/* Row echo (incoming /row → out) */}
+                                <div className="flex" style={{ alignItems: 'center', gap: '8px' }}>
+                                    <input type="checkbox" checked={oscRowEnabled} onChange={e => setOscRowEnabled(e.target.checked)} />
+                                    <span style={{ fontSize: '0.8em', width: '84px', color: '#ccc' }}>Row echo</span>
+                                    <input
+                                        type="text"
+                                        value={oscRowAddress}
+                                        onChange={e => setOscRowAddress(e.target.value)}
+                                        placeholder="/row"
+                                        title="Echoed back out when an incoming /row message is received"
+                                        style={{ flex: 1, padding: '6px', background: '#111', border: '1px solid #333', color: '#fff' }}
+                                    />
+                                </div>
                             </div>
 
                             <div className="flex flex-col">

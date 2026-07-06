@@ -187,7 +187,28 @@ The transport panel uses a unified 4×2 button grid with no gap between rows:
 ## External Hardware Integration
 
 ### OSC Bridge
-The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for receiving live spike data from MEA recording systems, and streaming out current playback state/burst coordinates to external visualizers (e.g. TouchDesigner).
+The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for receiving live spike data from MEA recording systems, and streaming out current playback state/burst coordinates to external visualizers (e.g. TouchDesigner). Configure it from the **OSC Bridge** panel in the app; changes are pushed to the bridge live over the WebSocket connection, no restart needed unless you edit `osc-bridge.js` itself.
+
+**Ports & destinations**
+- **Input Port** — UDP port the bridge listens on for incoming OSC (default `3333`).
+- **Output Port** — default UDP port used for outgoing OSC.
+- **Output IP(s)** — one or more destination IPs, comma-separated, to stream to multiple computers at once: `192.168.1.5, 192.168.1.6:3334`. Append `:port` to a specific IP to override the shared Output Port for just that destination.
+
+**Output Messages** — toggle which values stream out, and rename their OSC address:
+
+| Message | Default address | Sent as |
+|---|---|---|
+| Row index | `/index` | `/index <rowIndex>` (playback position, ms) |
+| Firing neuron coords | `/x`, `/y` prefixes | `/x1 <x>`, `/y1 <y>`, `/x2 <x>`, `/y2 <y>`, … for up to 5 recently-fired neurons |
+| Row echo | `/row` | `/row <value>` — echoes an incoming `/row <n>` message back out after driving playback to that row |
+
+Untick a row to stop sending it; edit the address field to rename it (e.g. `/index` → `/timestamp`).
+
+**Networking notes** — since the bridge sends raw UDP, both machines need to be reachable on the same network:
+- Use the receiving machine's actual LAN IP (check with `ipconfig`/`ifconfig` on that machine), not `127.0.0.1`.
+- Both machines must be on the same subnet (e.g. both `192.168.1.x`).
+- The receiving machine's firewall must allow inbound UDP on the port you're sending to.
+- Public/campus Wi-Fi (eduroam, guest networks) commonly enables client isolation, blocking device-to-device traffic even on the same SSID — use a private router, wired switch, or hotspot instead if OSC isn't arriving despite correct IP/firewall settings.
 
 ### Serial Hardware Bridge
 A dedicated serial bridge (`server/serial-bridge.js`) connects the web application to physical microcontrollers (e.g., Arduino Uno R4). It transmits structural firing events and high-order burst flags encoded into a compact byte stream, allowing physical LED matrices or fiber optic sculptures to fire in real-time synchrony with the organoid recordings.
