@@ -21,6 +21,7 @@ npm install
 npm run dev          # Vite dev server only
 npm start            # Dev server + OSC bridge (for live MEA data)
 npm run electron:dev # Desktop app with Electron
+npm test             # unit tests (show schedule/runner, playhead math)
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
@@ -191,8 +192,10 @@ The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for 
 
 **Ports & destinations**
 - **Input Port** — UDP port the bridge listens on for incoming OSC (default `3333`).
-- **Output Port** — default UDP port used for outgoing OSC.
+- **Output Port** — default UDP port used for outgoing OSC (`1234`, EoC-biomes' port).
 - **Output IP(s)** — one or more destination IPs, comma-separated, to stream to multiple computers at once: `192.168.1.5, 192.168.1.6:3334`. Append `:port` to a specific IP to override the shared Output Port for just that destination.
+
+Settings are saved in the browser and restored on reload.
 
 **Output Messages** — toggle which values stream out, and rename their OSC address:
 
@@ -209,9 +212,34 @@ Untick a row to stop sending it; edit the address field to rename it (e.g. `/ind
 - Both machines must be on the same subnet (e.g. both `192.168.1.x`).
 - The receiving machine's firewall must allow inbound UDP on the port you're sending to.
 - Public/campus Wi-Fi (eduroam, guest networks) commonly enables client isolation, blocking device-to-device traffic even on the same SSID — use a private router, wired switch, or hotspot instead if OSC isn't arriving despite correct IP/firewall settings.
+- A receiver on Wi-Fi (e.g. the audio Mac mini on the show router) works the same way — add its LAN IP:port to Output IP(s). Each `/index` carries the absolute frame, so an occasional dropped UDP packet over Wi-Fi is harmless; prefer wired for EoC, since `/sim_off` · `/sim_on` are single messages.
 
 ### Serial Hardware Bridge
 A dedicated serial bridge (`server/serial-bridge.js`) connects the web application to physical microcontrollers (e.g., Arduino Uno R4). It transmits structural firing events and high-order burst flags encoded into a compact byte stream, allowing physical LED matrices or fiber optic sculptures to fire in real-time synchrony with the organoid recordings.
+
+## Show Mode
+
+Runs the EoC-biomes installation by itself: the **SHOW** panel (top of the views) starts a loop that the OSC bridge keeps time for, so a reloaded or backgrounded tab never stalls it.
+
+| When | OSC out (to every Output IP) |
+|---|---|
+| Pass start | `/sim_resetSimsOnly 1`, then `/sim_on 5.0` (fade in) |
+| During the pass (50 min) | `/index` 0 → 179999 at 60/s; `/sim_resetTermites` ×5 and `/sim_resetPhysarum` ×10, evenly spaced |
+| Pass end | `/sim_off 5.0` (fade to black), then 2 min of silence |
+| STOP SHOW (two clicks) | `/sim_off 5.0` |
+
+- `/index` is data milliseconds = the EoC firing-blob frame. A pass is locked to the wall clock: exactly 50:00; a late tick sends the frames it skipped, so receivers see every index.
+- Every message goes to every Output IP — e.g. `192.168.1.5:1234, 192.168.1.7:9000` sends the show to EoC and to the audio Mac mini.
+- The Arduino LED matrices (serial bridge) and the SOUND clicks follow the show's playhead too (driven from the bridge's per-tick `SHOW_STATE`, so they keep going with the tab in the background).
+- Range, index rate, off time, fade and reset counts are editable while stopped.
+- While the show runs, local playback, scrubbing and `/row` input are locked; the bridge is the only `/index` sender. The other views follow the show's playhead.
+- HUD: `PASS 3 · ▶ ON · IDX 091204 / 179999 · OFF IN 24:47 · → 192.168.1.5:1234` — check the destination before starting.
+- Restarting the bridge stops the show; press START SHOW again.
+- Reloading the tab keeps the show running (the bridge owns it) but drops the loaded CSVs: load them again, or the LED matrices, sound and raster stay quiet.
+- The bridges only accept WebSocket connections from this machine's pages (loopback + Origin check).
+- `node scripts/show-smoke.mjs` (with no bridge running) checks the whole loop end to end against a local OSC listener.
+
+EoC needs the `/sim_off` · `/sim_on` handlers from its `show-sim-off` branch.
 
 ## Spout Output
 

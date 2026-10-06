@@ -1,15 +1,18 @@
 import { Client, Server } from 'node-osc';
 import { WebSocketServer, WebSocket } from 'ws';
+import { createShowRunner } from './show-runner.js';
+import { isLocalOrigin } from './local-origin.js';
 
 // Default Configuration
 const DEFAULT_OSC_IN_PORT = 3333;
-const DEFAULT_OSC_OUT_PORT = 3334;
+const DEFAULT_OSC_OUT_PORT = 1234; // EoC-biomes OSCMapping port in the show scenes
 const DEFAULT_OSC_OUT_IP = '127.0.0.1';
 const WS_PORT = 8080;
 
 // State
 let oscServer;
 let oscClients = []; // One OSC Client per destination
+let oscDestinations = []; // { ip, port } of each client, for the show HUD
 let wsServer;
 let oscInPort = DEFAULT_OSC_IN_PORT;
 let oscOutPort = DEFAULT_OSC_OUT_PORT;
@@ -27,13 +30,29 @@ let oscOut = {
     rowAddress: '/row',
 };
 
+// Show mode: the bridge owns the show clock (show-runner.js), so a reloaded or
+// backgrounded tab can't stall /index. Sends go to whichever oscClients are current.
+// SHOW_STATE goes out every tick (60 Hz, localhost): the browser drives the LED
+// matrices and sound from these messages, which keep arriving when its tab is hidden.
+const show = createShowRunner({
+    send: sendToAll,
+    onState: broadcastShowState,
+});
+let lastShowLog = '';
+
 // Initialize WebSocket Server
 function startWsServer() {
-    wsServer = new WebSocketServer({ port: WS_PORT });
-    console.log(`WebSocket bridge running on ws://localhost:${WS_PORT}`);
+    wsServer = new WebSocketServer({
+        host: '127.0.0.1',
+        port: WS_PORT,
+        verifyClient: ({ origin }) => isLocalOrigin(origin),
+    });
+    console.log(`WebSocket bridge running on ws://127.0.0.1:${WS_PORT}`);
 
     wsServer.on('connection', (ws) => {
         console.log('Frontend connected');
+        // A (re)loaded tab learns where the show is straight away.
+        ws.send(JSON.stringify({ type: 'SHOW_STATE', payload: showStatePayload() }));
 
         ws.on('message', (message) => {
             try {
@@ -41,7 +60,14 @@ function startWsServer() {
 
                 // Handle Configuration Updates
                 if (data.type === 'CONFIG') {
-                    updateOscConfig(data.payload);
+                    // A tab pushes its settings as soon as it connects. Mid-show that push
+                    // must not re-point the running show (a fresh tab may only know the
+                    // defaults): keep the bridge's settings and hand them back to adopt.
+                    if (data.initial && show.isRunning()) {
+                        ws.send(JSON.stringify({ type: 'OSC_CONFIG', payload: currentOscConfig() }));
+                    } else {
+                        updateOscConfig(data.payload);
+                    }
                 }
                 // Handle Outgoing OSC (from App -> External)
                 else if (data.type === 'OSC_SEND') {
@@ -51,10 +77,26 @@ function startWsServer() {
                 else if (data.type === 'OSC_BUNDLE') {
                     sendOscBundle(data.payload);
                 }
+                // Show mode. START while running is ignored; every tab still gets the state.
+                else if (data.type === 'SHOW_START') {
+                    const config = { ...(data.payload?.config || {}), indexAddress: oscOut.timeAddress };
+                    if (!show.start(config)) broadcastShowState();
+                }
+                else if (data.type === 'SHOW_STOP') {
+                    if (!show.stop()) broadcastShowState();
+                }
             } catch (e) {
                 console.error('Error parsing WS message:', e);
             }
         });
+    });
+}
+
+function broadcast(message) {
+    if (!wsServer) return;
+    const data = JSON.stringify(message);
+    wsServer.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) client.send(data);
     });
 }
 
@@ -68,21 +110,10 @@ function startOscServer(port) {
         });
 
         oscServer.on('message', (msg) => {
-            // msg is [address, ...args]
+            // msg is [address, ...args]; the frontend reads { address, args }.
             // We expect something like ['/row', 123]
             console.log(`OSC IN: ${msg}`);
-
-            // Broadcast to all connected WS clients
-            if (wsServer) {
-                wsServer.clients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({
-                            type: 'OSC_MSG',
-                            payload: msg
-                        }));
-                    }
-                });
-            }
+            broadcast({ type: 'OSC_MSG', payload: { address: msg[0], args: msg.slice(1) } });
         });
     } catch (e) {
         console.error(`Failed to start OSC server on port ${port}:`, e);
@@ -91,7 +122,8 @@ function startOscServer(port) {
 
 // Parse a destination string into { ip, port } entries.
 // Accepts a comma-separated list; each entry may be "ip" or "ip:port".
-// Entries without a port fall back to the shared defaultPort.
+// Entries without a port fall back to the shared defaultPort. Entries whose port is out
+// of UDP range are dropped: dgram throws on send, which would kill the show clock.
 function parseDestinations(ipString, defaultPort) {
     return String(ipString || '')
         .split(',')
@@ -101,6 +133,11 @@ function parseDestinations(ipString, defaultPort) {
             const [ip, port] = entry.split(':');
             const parsedPort = port ? parseInt(port, 10) : defaultPort;
             return { ip: ip.trim(), port: Number.isFinite(parsedPort) ? parsedPort : defaultPort };
+        })
+        .filter(({ ip, port }) => {
+            if (Number.isInteger(port) && port > 0 && port < 65536) return true;
+            console.warn(`Ignoring OSC destination ${ip}:${port} (port must be 1-65535)`);
+            return false;
         });
 }
 
@@ -109,8 +146,8 @@ function updateOscClients(ipString, port) {
     oscClients.forEach(c => c.close());
     oscClients = [];
 
-    const destinations = parseDestinations(ipString, port);
-    destinations.forEach(({ ip, port: p }) => {
+    oscDestinations = parseDestinations(ipString, port);
+    oscDestinations.forEach(({ ip, port: p }) => {
         oscClients.push(new Client(ip, p));
         console.log(`OSC Client ready to send to ${ip}:${p}`);
     });
@@ -145,9 +182,42 @@ function updateOscConfig(config) {
         oscOut = { ...oscOut, ...config.osc };
         console.log('OSC output config:', oscOut);
     }
+
+    // Destinations may have changed; the show HUD displays them.
+    broadcastShowState();
+}
+
+function currentOscConfig() {
+    return { oscInPort, oscOutPort, oscOutIp, osc: { ...oscOut } };
+}
+
+function sendToAll(address, args) {
+    oscClients.forEach(client => {
+        client.send(address, ...args, (err) => {
+            if (err) console.error('OSC Send Error:', err);
+        });
+    });
+}
+
+function showStatePayload() {
+    return {
+        ...show.getState(),
+        destinations: oscDestinations.map(d => `${d.ip}:${d.port}`),
+    };
+}
+
+function broadcastShowState() {
+    const payload = showStatePayload();
+    const label = payload.running ? `pass ${payload.pass} ${payload.phase}` : 'stopped';
+    if (label !== lastShowLog) {
+        console.log(`SHOW: ${label}`);
+        lastShowLog = label;
+    }
+    broadcast({ type: 'SHOW_STATE', payload });
 }
 
 function sendOscMessage(value) {
+    if (show.isRunning()) return; // the show is the only sender while it runs
     if (oscClients.length === 0) {
         console.warn('No OSC clients initialized');
         return;
@@ -163,6 +233,7 @@ function sendOscMessage(value) {
 }
 
 function sendOscBundle(bundle) {
+    if (show.isRunning()) return; // the show is the only /index sender while it runs
     if (oscClients.length === 0) return;
 
     console.log('Sending Bundle:', bundle); // Debug Log
