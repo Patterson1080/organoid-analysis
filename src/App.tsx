@@ -667,7 +667,6 @@ function App() {
                     recentFiringNeuronsRef.current.push(n);
                 }
             });
-            // Keep last 5
             if (recentFiringNeuronsRef.current.length > 5) {
                 recentFiringNeuronsRef.current = recentFiringNeuronsRef.current.slice(-5);
             }
@@ -675,18 +674,15 @@ function App() {
 
         // Play sound for spikes in this frame
         if (soundEnabled && spikesInFrame.length > 0) {
-            const spikeCount = spikesInFrame.length;
-            if (spikeCount > 0) {
-                playMultipleClicks(spikeCount, 10);
+            playMultipleClicks(spikesInFrame.length, 10);
 
-                // Check for synchronized burst (multiple neurons firing together)
-                const uniqueNeurons = new Set(spikesInFrame.map(s => s.neuron_id)).size;
-                if (uniqueNeurons >= burstThreshold) {
-                    const timeSinceLastBurst = frameTime - lastBurstTimeRef.current;
-                    if (timeSinceLastBurst > 200) { // Prevent multiple bass hits too close
-                        playBassPulse(uniqueNeurons / burstThreshold);
-                        lastBurstTimeRef.current = frameTime;
-                    }
+            // Check for synchronized burst (multiple neurons firing together)
+            const uniqueNeurons = new Set(spikesInFrame.map(s => s.neuron_id)).size;
+            if (uniqueNeurons >= burstThreshold) {
+                const timeSinceLastBurst = frameTime - lastBurstTimeRef.current;
+                if (timeSinceLastBurst > 200) { // Prevent multiple bass hits too close
+                    playBassPulse(uniqueNeurons / burstThreshold);
+                    lastBurstTimeRef.current = frameTime;
                 }
             }
         }
@@ -699,27 +695,20 @@ function App() {
             const { minX, maxX, minY, maxY } = neuronBoundsRef.current;
             const rangeX = maxX - minX || 1;
             const rangeY = maxY - minY || 1;
+            // Neuron position → 0–15 grid cell on the LED matrix.
+            const toCell = (n: Neuron) => ({
+                x: Math.round(((n.x - minX) / rangeX) * 15),
+                y: Math.round(((n.y - minY) / rangeY) * 15),
+            });
 
-            let firings = [];
-            if (isBurst) {
+            const firings = isBurst
                 // Send all correlating neurons for the geometric pattern
-                firings = spikesInFrame.map(s => {
-                    const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
-                    if (n) {
-                        const normX = (n.x - minX) / rangeX;
-                        const normY = (n.y - minY) / rangeY;
-                        return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
-                    }
-                    return null;
-                }).filter(Boolean);
-            } else {
+                ? spikesInFrame
+                    .map(s => neurons.find(neuron => neuron.neuron_id === s.neuron_id))
+                    .filter((n): n is Neuron => n !== undefined)
+                    .map(toCell)
                 // Send only recent firings for layer 1
-                firings = recentFiringNeuronsRef.current.map(n => {
-                    const normX = (n.x - minX) / rangeX;
-                    const normY = (n.y - minY) / rangeY;
-                    return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
-                });
-            }
+                : recentFiringNeuronsRef.current.map(toCell);
 
             if (isBurst || firings.length > 0) {
                 serialWsRef.current.send(JSON.stringify({

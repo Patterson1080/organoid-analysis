@@ -59,11 +59,11 @@ test('a late tick skips ahead to the next future boundary (no catch-up burst)', 
     assert.ok(Math.abs(h.timers.at(-1).at - 7000 / 60) < 1e-9);   // next boundary at 116.67 ms
 });
 
-test('broadcasts every 4th tick and on every phase change', () => {
+test('publishes state after every tick, through the phase change', () => {
     const h = harness();
     h.runner.start({ endIndex: 59, offSeconds: 1 }); // 1 s pass, 1 s off
     for (let i = 0; i < 8; i++) h.fireNext();
-    assert.equal(h.states.length, 3); // ticks 0, 4, 8
+    assert.equal(h.states.length, 9); // the start tick + 8
     h.setClock(1000.5);
     h.timers.at(-1).fn();
     assert.equal(h.states.at(-1).phase, 'off');

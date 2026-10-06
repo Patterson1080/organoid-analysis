@@ -3,10 +3,12 @@
 //   node scripts/show-smoke.mjs
 // Spawns server/osc-bridge.js, points it at a local OSC listener, runs a 1 s pass + 1 s
 // off, simulates a tab reload mid-show (initial CONFIG with defaults), a stray local
-// OSC_BUNDLE and a second START, then STOPs. Exits 1 on any mismatch.
+// OSC_BUNDLE and a second START, then STOPs. Also checks that a cross-site page is
+// refused, an out-of-range port is dropped, and inbound OSC reaches tabs as
+// { address, args }. Exits 1 on any mismatch.
 import { spawn } from 'node:child_process';
 import { WebSocket } from 'ws';
-import { Server } from 'node-osc';
+import { Client, Server } from 'node-osc';
 
 const OSC_PORT = 39124;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -68,8 +70,19 @@ const refused = await new Promise(resolve => {
 });
 if (!refused) fail('bridge accepted a cross-site Origin');
 
+// An out-of-range port is dropped: dgram would throw on send and take the bridge down.
+tab.send(JSON.stringify({ type: 'CONFIG', payload: { oscOutIp: '127.0.0.1', oscOutPort: 99999 } }));
+if ((await next(tab, 'SHOW_STATE')).destinations.length !== 0) fail('out-of-range port kept as a destination');
+
 tab.send(JSON.stringify({ type: 'CONFIG', payload: { oscOutIp: '127.0.0.1', oscOutPort: OSC_PORT } }));
 if ((await next(tab, 'SHOW_STATE')).destinations.join() !== `127.0.0.1:${OSC_PORT}`) fail('CONFIG did not re-point destinations');
+
+// Inbound OSC reaches tabs as { address, args } (the OSC Bridge panel reads both).
+const inbound = new Client('127.0.0.1', 3333);
+inbound.send('/row', 42);
+const oscMsg = await next(tab, 'OSC_MSG');
+inbound.close();
+if (oscMsg.address !== '/row' || oscMsg.args[0] !== 42) fail(`OSC_MSG payload ${JSON.stringify(oscMsg)}`);
 
 tab.send(JSON.stringify({ type: 'SHOW_START', payload: { config: { endIndex: 59, offSeconds: 1, fadeSeconds: 1 } } }));
 await sleep(400);
@@ -103,4 +116,4 @@ if (indices.length < 55 || indices.at(-1) !== 59) fail(`index stream ${indices.l
 if (count('/sim_resetTermites') !== 5 || count('/sim_resetPhysarum') !== 10) fail('spread resets missing');
 const passMs = received.find(m => m.address === '/sim_off').at - received.find(m => m.address === '/index').at;
 if (passMs < 950 || passMs > 1150) fail(`pass took ${passMs.toFixed(0)} ms`);
-console.log(`OK: ${indices.length} /index, 15 resets, 1 /sim_on, 2 /sim_off, pass ${passMs.toFixed(0)} ms, reload-safe, cross-site refused`);
+console.log(`OK: ${indices.length} /index, 15 resets, 1 /sim_on, 2 /sim_off, pass ${passMs.toFixed(0)} ms, reload-safe, cross-site refused, bad port dropped, inbound OSC shaped`);

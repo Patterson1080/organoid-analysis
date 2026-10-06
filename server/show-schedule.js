@@ -97,7 +97,7 @@ export function stateAt(config, elapsedMs) {
 
 // /sim_on · /sim_off argument. Explicit float tag: node-osc infers 5 as int32. A fresh
 // object per call — node-osc rewrites arg.type in place while encoding.
-export const fadeArg = config => ({ type: 'f', value: config.fadeSeconds });
+const fadeArg = config => ({ type: 'f', value: config.fadeSeconds });
 
 export function offMessage(config) {
     return { address: config.offAddress, args: [fadeArg(config)] };

@@ -12,6 +12,7 @@ const WS_PORT = 8080;
 // State
 let oscServer;
 let oscClients = []; // One OSC Client per destination
+let oscDestinations = []; // { ip, port } of each client, for the show HUD
 let wsServer;
 let oscInPort = DEFAULT_OSC_IN_PORT;
 let oscOutPort = DEFAULT_OSC_OUT_PORT;
@@ -36,7 +37,6 @@ let oscOut = {
 const show = createShowRunner({
     send: sendToAll,
     onState: broadcastShowState,
-    broadcastEvery: 1,
 });
 let lastShowLog = '';
 
@@ -92,7 +92,6 @@ function startWsServer() {
     });
 }
 
-// Send one JSON message to every connected tab.
 function broadcast(message) {
     if (!wsServer) return;
     const data = JSON.stringify(message);
@@ -111,10 +110,10 @@ function startOscServer(port) {
         });
 
         oscServer.on('message', (msg) => {
-            // msg is [address, ...args]
+            // msg is [address, ...args]; the frontend reads { address, args }.
             // We expect something like ['/row', 123]
             console.log(`OSC IN: ${msg}`);
-            broadcast({ type: 'OSC_MSG', payload: msg });
+            broadcast({ type: 'OSC_MSG', payload: { address: msg[0], args: msg.slice(1) } });
         });
     } catch (e) {
         console.error(`Failed to start OSC server on port ${port}:`, e);
@@ -123,7 +122,8 @@ function startOscServer(port) {
 
 // Parse a destination string into { ip, port } entries.
 // Accepts a comma-separated list; each entry may be "ip" or "ip:port".
-// Entries without a port fall back to the shared defaultPort.
+// Entries without a port fall back to the shared defaultPort. Entries whose port is out
+// of UDP range are dropped: dgram throws on send, which would kill the show clock.
 function parseDestinations(ipString, defaultPort) {
     return String(ipString || '')
         .split(',')
@@ -133,6 +133,11 @@ function parseDestinations(ipString, defaultPort) {
             const [ip, port] = entry.split(':');
             const parsedPort = port ? parseInt(port, 10) : defaultPort;
             return { ip: ip.trim(), port: Number.isFinite(parsedPort) ? parsedPort : defaultPort };
+        })
+        .filter(({ ip, port }) => {
+            if (Number.isInteger(port) && port > 0 && port < 65536) return true;
+            console.warn(`Ignoring OSC destination ${ip}:${port} (port must be 1-65535)`);
+            return false;
         });
 }
 
@@ -141,8 +146,8 @@ function updateOscClients(ipString, port) {
     oscClients.forEach(c => c.close());
     oscClients = [];
 
-    const destinations = parseDestinations(ipString, port);
-    destinations.forEach(({ ip, port: p }) => {
+    oscDestinations = parseDestinations(ipString, port);
+    oscDestinations.forEach(({ ip, port: p }) => {
         oscClients.push(new Client(ip, p));
         console.log(`OSC Client ready to send to ${ip}:${p}`);
     });
@@ -186,7 +191,6 @@ function currentOscConfig() {
     return { oscInPort, oscOutPort, oscOutIp, osc: { ...oscOut } };
 }
 
-// Show mode: one message to every destination.
 function sendToAll(address, args) {
     oscClients.forEach(client => {
         client.send(address, ...args, (err) => {
@@ -198,7 +202,7 @@ function sendToAll(address, args) {
 function showStatePayload() {
     return {
         ...show.getState(),
-        destinations: parseDestinations(oscOutIp, oscOutPort).map(d => `${d.ip}:${d.port}`),
+        destinations: oscDestinations.map(d => `${d.ip}:${d.port}`),
     };
 }
 

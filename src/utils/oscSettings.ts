@@ -39,7 +39,7 @@ export function loadOscSettings(storage?: KeyValueStore): OscSettings {
         const saved = JSON.parse((storage ?? globalThis.localStorage).getItem(KEY) ?? 'null');
         if (!saved || typeof saved !== 'object') return out;
         for (const key of Object.keys(out) as (keyof OscSettings)[]) {
-            if (typeof saved[key] === typeof out[key]) (out as unknown as Record<string, unknown>)[key] = saved[key];
+            if (typeof saved[key] === typeof out[key]) Object.assign(out, { [key]: saved[key] });
         }
     } catch {
         // Unreadable or blocked storage: defaults.
