@@ -235,6 +235,7 @@ Runs the EoC-biomes installation by itself: the **SHOW** panel (top of the views
 - While the show runs, local playback, scrubbing and `/row` input are locked; the bridge is the only `/index` sender. The other views follow the show's playhead.
 - HUD: `PASS 3 · ▶ ON · IDX 091204 / 179999 · OFF IN 24:47 · → 192.168.1.5:1234` — check the destination before starting.
 - Restarting the bridge stops the show; press START SHOW again.
+- Reloading the tab keeps the show running (the bridge owns it) but drops the loaded CSVs: load them again, or the LED matrices, sound and raster stay quiet.
 - The bridges only accept WebSocket connections from this machine's pages (loopback + Origin check).
 - `node scripts/show-smoke.mjs` (with no bridge running) checks the whole loop end to end against a local OSC listener.
 
