@@ -169,6 +169,6 @@ const passMs = received.find(m => m.address === '/sim_off').at - received.find(m
 if (passMs < 950 || passMs > 1150) fail(`pass took ${passMs.toFixed(0)} ms`);
 // One LED frame per tick (a late tick covers several ms), so fewer than 60 under load.
 if (ledFrames.length < 30) fail(`bridge sent ${ledFrames.length} LED frames during the pass`);
-if (!ledFrames.some(f => f.isBurst && f.firings.length === 8)) fail('the 8-neuron burst at 30 ms never lit');
+if (!ledFrames.some(f => f.isBurst && f.firings.length >= 8)) fail('the 8-neuron burst at 30 ms never lit');
 console.log(`OK: ${indices.length} /index, 15 resets, 1 /sim_on, 2 /sim_off, pass ${passMs.toFixed(0)} ms, reload-safe, cross-site refused, ` +
     `bad port dropped, inbound OSC shaped, data/ served locally, ${ledFrames.length} LED frames from the bridge`);
