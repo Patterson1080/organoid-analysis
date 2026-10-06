@@ -229,7 +229,8 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
     // The graph is always drawn in width×height units; in presentation the box is scaled
     // to its parent (displayScale = CSS px per unit) and the backing store follows it
     // (pixelScale = device px per unit) so the small type stays sharp.
-    const [displayScale, setDisplayScale] = useState(1);
+    const [fitScale, setFitScale] = useState(1);
+    const displayScale = presentation ? fitScale : 1;
     const pixelScale = presentation ? Math.max(1, displayScale * (window.devicePixelRatio || 1)) : 1;
     const [mode, setMode] = useState<GraphMode>('NORMAL');
     const [enableStrobe, setEnableStrobe] = useState(true);
@@ -249,10 +250,9 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
     };
 
     useEffect(() => {
-        if (!presentation) { setDisplayScale(1); return; }
         const el = wrapRef.current;
-        if (!el) return;
-        const ro = new ResizeObserver(entries => setDisplayScale(entries[0].contentRect.width / width));
+        if (!presentation || !el) return;
+        const ro = new ResizeObserver(entries => setFitScale(entries[0].contentRect.width / width));
         ro.observe(el);
         return () => ro.disconnect();
     }, [presentation, width]);
@@ -513,7 +513,7 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
         <div style={{ position: 'relative' }}>
             <div ref={wrapRef} style={{
                 ...(presentation
-                    ? { width: `min(100%, calc(var(--pres-fit, 100vh) * ${width / height}))`, aspectRatio: `${width} / ${height}`, margin: '0 auto' }
+                    ? { width: `min(100%, calc(var(--pres-fit) * ${width / height}))`, aspectRatio: `${width} / ${height}`, margin: '0 auto' }
                     : { width: width, height: height }),
                 background: '#000',
                 border: '1px solid #333',

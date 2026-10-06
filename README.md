@@ -187,7 +187,7 @@ The transport panel uses a unified 4×2 button grid with no gap between rows:
 
 `⛶ PRESENT` (top right) shows only the open visualizations, fullscreen when the browser allows it. The header, data loading, transport, settings and OSC panels, and each view's export/settings buttons are hidden; titles, HUDs, legends and stats stay. Wide views (show panel, activity analysis, real-time graph) span the full width; square views (3D maps, circular graphs, neural web, hypergraphs) share rows and are capped at one screen height. The page scrolls when the views don't fit one screen. Space and ←/→ still drive playback.
 
-Exit with the small icon at the bottom centre or by pressing **Esc twice**. In Chromium (and Electron) a single Esc doesn't leave fullscreen during the presentation (hold Esc to leave fullscreen only); in other browsers the first Esc leaves fullscreen and the second ends the presentation.
+Exit with the small icon at the bottom centre or by pressing **Esc twice**. In Chromium (and Electron) a single Esc doesn't leave fullscreen during the presentation (hold Esc to leave fullscreen only); in other browsers the first Esc leaves fullscreen and a second Esc within about a second ends the presentation.
 
 ---
 

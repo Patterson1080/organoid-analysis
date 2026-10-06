@@ -20,6 +20,10 @@ The spike CSV is a binary matrix: one row per millisecond, 131 neuron columns, `
 
 `App.tsx` advances `playbackTimeRef` in a `requestAnimationFrame` loop (target-duration speed, burst slow-motion), throttles React state to ~10 Hz, sends `OSC_BUNDLE` (`/index`, `/x1../y1`) per frame to the bridge, and hands the frame's spikes to `emitFrameOutputs` (recent-neuron trail, click/bass sound, `SERIAL_SYNC` to the serial bridge). Views receive `currentTime` and draw from it.
 
+## Presentation view
+
+`App`'s `presentation` state adds a `.presentation` class to the root and requests fullscreen (Keyboard Lock on Esc in Chromium; Esc twice or the bottom icon exits). CSS in `src/index.css` hides the header, controls and footer and lays the views out as a grid: `full-width` cells span the row, `pres-square` cells share it (column count capped by how many there are, via `:has()`), and `--pres-fit` caps a view at one screen height. Each view also takes a `presentation` prop to drop its own buttons/settings and size its canvas to the box.
+
 ## Show mode
 
 ```

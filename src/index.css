@@ -298,16 +298,20 @@ header {
     display: none;
 }
 
+/* auto-fit can't collapse empty columns while a full-width view spans them all, so the
+   column count is capped by the number of square views (--pres-cols) instead. */
 .presentation .viz-section {
+    --pres-cols: 1;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 600px), 1fr));
+    grid-template-columns: repeat(auto-fit,
+            minmax(max(min(100%, 600px), 100% / var(--pres-cols) - var(--pres-gutter)), 1fr));
     grid-auto-flow: row dense;
     gap: var(--pres-gutter);
 }
 
-.presentation .pres-wide {
-    grid-column: 1 / -1;
-}
+.presentation .viz-section:has(> :nth-child(2 of .pres-square)) { --pres-cols: 2; }
+.presentation .viz-section:has(> :nth-child(3 of .pres-square)) { --pres-cols: 3; }
+.presentation .viz-section:has(> :nth-child(4 of .pres-square)) { --pres-cols: 4; }
 
 .presentation .pres-square {
     display: flex;
@@ -316,7 +320,7 @@ header {
 }
 
 /* Box for the 3D scenes: square, but never taller than the screen. */
-.pres-box {
+.presentation .pres-box {
     width: 100%;
     aspect-ratio: 1;
     max-height: var(--pres-fit);

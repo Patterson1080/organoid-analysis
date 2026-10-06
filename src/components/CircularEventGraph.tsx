@@ -78,6 +78,7 @@ interface CircularEventGraphProps {
     onTimeScrub?: (newTime: number) => void;
     onScrubStateChange?: (isScrubbing: boolean) => void;
     onCenterTap?: () => void;
+    title?: string;
     presentation?: boolean; // fit the disc to the viewport, no detach/export buttons
 }
 
@@ -192,6 +193,7 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
     presentation = false,
     onTimeScrub,
     onScrubStateChange,
+    onCenterTap,
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isExporting, setIsExporting] = useState(false);

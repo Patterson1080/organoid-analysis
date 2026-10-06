@@ -20,6 +20,9 @@ import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledF
 import { parseNeuronCSV, parseSpikeCSV } from './utils/dataProcessing';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
 
+// Keyboard Lock (Chromium only) isn't in TypeScript's DOM types.
+type KeyboardLockNavigator = Navigator & { keyboard?: { lock?(keys: string[]): Promise<void>; unlock?(): void } };
+
 // Binary search helpers removed as they were unused
 
 const FPSCounter = () => {
@@ -67,7 +70,7 @@ function App() {
     // Presentation view: only the open visualizations, laid out to the viewport (fullscreen
     // when the browser allows it). Exit with the small icon at the bottom or Esc twice.
     const [presentation, setPresentation] = useState(false);
-    const [presentationHint, setPresentationHint] = useState(false);
+    const presentingRef = useRef(false); // read when the async fullscreen request settles
 
     const allSpikesRef = useRef<SpikeEvent[]>([]);
 
@@ -675,22 +678,24 @@ function App() {
     }, [endTime]);
 
     const enterPresentation = useCallback(() => {
+        presentingRef.current = true;
         setPresentation(true);
-        setPresentationHint(true);
         const root = document.documentElement;
         if (!document.fullscreenElement && root.requestFullscreen) {
-            // Keyboard Lock (Chromium) hands single Esc presses to the page instead of
-            // leaving fullscreen, so the double-Esc exit works; holding Esc still leaves.
+            // Keyboard Lock hands single Esc presses to the page instead of leaving
+            // fullscreen, so the double-Esc exit works; holding Esc still leaves.
             root.requestFullscreen()
-                .then(() => (navigator as any).keyboard?.lock?.(['Escape']))
+                .then(() => presentingRef.current
+                    ? (navigator as KeyboardLockNavigator).keyboard?.lock?.(['Escape'])
+                    : document.exitFullscreen()) // presentation ended while the request was pending
                 .catch(() => { /* fullscreen refused: present in the window */ });
         }
     }, []);
 
     const exitPresentation = useCallback(() => {
+        presentingRef.current = false;
         setPresentation(false);
-        setPresentationHint(false);
-        (navigator as any).keyboard?.unlock?.();
+        (navigator as KeyboardLockNavigator).keyboard?.unlock?.();
         if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     }, []);
 
@@ -706,7 +711,9 @@ function App() {
         const onKeyDown = (e: KeyboardEvent) => {
             if (e.key !== 'Escape') return;
             e.preventDefault();
-            escPressed();
+            // Holding Esc auto-repeats keydown well inside the double-press window; only
+            // the first press counts, so a hold leaves fullscreen but not the presentation.
+            if (!e.repeat) escPressed();
         };
         // Without Keyboard Lock the browser eats the first Esc to leave fullscreen; count
         // that as the first press so Esc Esc still exits.
@@ -715,11 +722,9 @@ function App() {
         };
         window.addEventListener('keydown', onKeyDown);
         document.addEventListener('fullscreenchange', onFullscreenChange);
-        const hintTimer = setTimeout(() => setPresentationHint(false), 3000);
         return () => {
             window.removeEventListener('keydown', onKeyDown);
             document.removeEventListener('fullscreenchange', onFullscreenChange);
-            clearTimeout(hintTimer);
         };
     }, [presentation, exitPresentation]);
 
@@ -1398,7 +1403,7 @@ function App() {
 
                 <div className="viz-section">
                     {showShowPanel && (
-                        <div className="grid-cell pres-wide">
+                        <div className="grid-cell full-width">
                             <ShowPanel
                                 spikes={allSpikesRef.current}
                                 maxNeuronId={maxNeuronId}
@@ -1415,7 +1420,7 @@ function App() {
                     {showOrganoid && neurons.length > 0 && (
                         <div className="grid-cell pres-square">
                             <h2>Organoid Map (3D)</h2>
-                            <div className={presentation ? 'pres-box' : undefined}>
+                            <div className="pres-box">
                             <Organoid3D
                                 neurons={neurons}
                                 spikes={visibleSpikes}
@@ -1436,7 +1441,7 @@ function App() {
                     )}
 
                     {showSpikeAnalysis && visibleSpikes.length > 0 && (
-                        <div className="grid-cell pres-wide">
+                        <div className="grid-cell full-width">
                             <div className="flex justify-between items-center" style={{ marginBottom: 'var(--space-md)' }}>
                                 <h2 style={{ margin: 0 }}>Activity Analysis</h2>
                             </div>
@@ -1452,7 +1457,7 @@ function App() {
                     {showPCA && visibleSpikes.length > 0 && (
                         <div className="grid-cell pres-square">
                             <h2 style={{ marginBottom: 'var(--space-md)' }}>PCA Trajectory (3D)</h2>
-                            <div className={presentation ? 'pres-box' : undefined}>
+                            <div className="pres-box">
                             <PCA3D
                                 spikes={visibleSpikes}
                                 neurons={neurons}
@@ -1464,7 +1469,7 @@ function App() {
                     )}
 
                     {showRealTimeGraph && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell pres-wide">
+                        <div className="grid-cell full-width">
                             <h2 style={{ marginBottom: 'var(--space-md)' }}>REAL-TIME GRAPH</h2>
                             <RealTimeGraph
                                 spikes={allSpikesRef.current}
@@ -1728,8 +1733,9 @@ function App() {
                         </div>
                     )}
 
-                    {!showOrganoid && !showSpikeAnalysis && !showPCA && !showRealTimeGraph && !showHypergraphs && (
-                        <div className="grid-cell pres-wide" style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {!presentation && !showOrganoid && !showSpikeAnalysis && !showPCA && !showRealTimeGraph && !showHypergraphs
+                        && !showCircularGraph && !showRegionsGraph && !showNeuralWeb && (
+                        <div className="grid-cell full-width" style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <div className="status-text" style={{ opacity: 0.5 }}>
                                 WAITING FOR DATA INPUT...
                             </div>
@@ -1744,7 +1750,7 @@ function App() {
 
             {presentation && (
                 <>
-                    {presentationHint && <div className="presentation-hint status-text">Press Esc twice to exit</div>}
+                    <div className="presentation-hint status-text">Press Esc twice to exit</div>
                     <button
                         className="presentation-exit"
                         onClick={exitPresentation}

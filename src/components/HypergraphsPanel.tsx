@@ -84,7 +84,7 @@ interface HypergraphsPanelProps {
     neurons: Neuron[];
     currentTime: number;
     isPlaying: boolean;
-    presentation?: boolean; // hide the settings sidebar and buttons, fit the 2D canvas to its box
+    presentation?: boolean; // hide the settings sidebar and buttons, fit the view to the screen
     // We pass the global window end time from App.tsx (usually 180s) to know data bounds if needed
 }
 
@@ -157,7 +157,7 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
         const ro = new ResizeObserver(updateSize);
         ro.observe(container);
         return () => ro.disconnect();
-    }, []);
+    }, [viewMode]); // the 2D container is remounted after a trip through 3D
 
     // --- Computation Logic ---
     useEffect(() => {
@@ -836,7 +836,7 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
                     <div ref={containerRef} className="viz-canvas" style={{
                         position: 'relative',
                         ...(presentation
-                            ? { gridColumn: '1 / -1', width: '100%', aspectRatio: '1', maxHeight: 'var(--pres-fit)', minHeight: 0 }
+                            ? { width: '100%', aspectRatio: '1', maxHeight: 'var(--pres-fit)', minHeight: 0 }
                             : { minHeight: '600px' }),
                         display: 'flex',
                         alignItems: 'center',
@@ -847,7 +847,14 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
                         <canvas ref={canvasRef} style={{ display: 'block', margin: '0 auto' }} />
                     </div>
                 ) : (
-                    <div className="viz-canvas" style={{ minHeight: presentation ? 'var(--pres-fit)' : '600px', border: showBurstSnapshot && frozenSnapshot ? '2px solid var(--color-accent)' : undefined }}>
+                    <div className="viz-canvas" style={{
+                        // Hypergraphs3D's own sizing classes have no CSS; in presentation a grid
+                        // stretches it to the box so its canvas fills the screen height.
+                        ...(presentation
+                            ? { display: 'grid', height: 'var(--pres-fit)', overflow: 'hidden' }
+                            : { minHeight: '600px' }),
+                        border: showBurstSnapshot && frozenSnapshot ? '2px solid var(--color-accent)' : undefined
+                    }}>
                         <Hypergraphs3D
                             frames={showBurstSnapshot && frozenSnapshot ? frozenSnapshot.frames : overlayFrames}
                             tracks={(showBurstSnapshot && frozenSnapshot) ? frozenSnapshot.tracks : (showLinks ? currentTracks : [])}

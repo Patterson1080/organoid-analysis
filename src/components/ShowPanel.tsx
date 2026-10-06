@@ -68,7 +68,8 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
-    const [rasterH, setRasterH] = useState(RASTER_H);
+    const [fitRasterH, setFitRasterH] = useState(RASTER_H);
+    const rasterH = presentation ? fitRasterH : RASTER_H;
     const [form, setForm] = useState<FormValues | null>(null);
     const [stopArmed, setStopArmed] = useState(false);
     const running = !!showState?.running;
@@ -97,8 +98,8 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
     }, []);
 
     useEffect(() => {
-        if (!presentation) { setRasterH(RASTER_H); return; }
-        const fit = () => setRasterH(Math.max(RASTER_H, Math.round(window.innerHeight * PRESENTATION_RASTER_SHARE)));
+        if (!presentation) return;
+        const fit = () => setFitRasterH(Math.max(RASTER_H, Math.round(window.innerHeight * PRESENTATION_RASTER_SHARE)));
         fit();
         window.addEventListener('resize', fit);
         return () => window.removeEventListener('resize', fit);
