@@ -1,6 +1,7 @@
 import { Client, Server } from 'node-osc';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createShowRunner } from './show-runner.js';
+import { isLocalOrigin } from './local-origin.js';
 
 // Default Configuration
 const DEFAULT_OSC_IN_PORT = 3333;
@@ -38,7 +39,11 @@ let lastShowLog = '';
 
 // Initialize WebSocket Server
 function startWsServer() {
-    wsServer = new WebSocketServer({ host: '127.0.0.1', port: WS_PORT });
+    wsServer = new WebSocketServer({
+        host: '127.0.0.1',
+        port: WS_PORT,
+        verifyClient: ({ origin }) => isLocalOrigin(origin),
+    });
     console.log(`WebSocket bridge running on ws://127.0.0.1:${WS_PORT}`);
 
     wsServer.on('connection', (ws) => {

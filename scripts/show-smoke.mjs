@@ -59,6 +59,15 @@ const first = await next(tab, 'SHOW_STATE');
 if (first.running || first.config.endIndex !== 179999) fail('fresh bridge should be stopped with default config');
 if (first.destinations.join() !== '127.0.0.1:1234') fail(`default destination ${first.destinations}`);
 
+// A page from another site must not get in (cross-site WebSocket hijacking).
+const refused = await new Promise(resolve => {
+    const evil = new WebSocket('ws://127.0.0.1:8080', { origin: 'https://evil.example' });
+    evil.once('open', () => { evil.close(); resolve(false); });
+    evil.once('error', () => resolve(true));
+    evil.once('unexpected-response', () => resolve(true));
+});
+if (!refused) fail('bridge accepted a cross-site Origin');
+
 tab.send(JSON.stringify({ type: 'CONFIG', payload: { oscOutIp: '127.0.0.1', oscOutPort: OSC_PORT } }));
 if ((await next(tab, 'SHOW_STATE')).destinations.join() !== `127.0.0.1:${OSC_PORT}`) fail('CONFIG did not re-point destinations');
 
@@ -94,4 +103,4 @@ if (indices.length < 55 || indices.at(-1) !== 59) fail(`index stream ${indices.l
 if (count('/sim_resetTermites') !== 5 || count('/sim_resetPhysarum') !== 10) fail('spread resets missing');
 const passMs = received.find(m => m.address === '/sim_off').at - received.find(m => m.address === '/index').at;
 if (passMs < 950 || passMs > 1150) fail(`pass took ${passMs.toFixed(0)} ms`);
-console.log(`OK: ${indices.length} /index, 15 resets, 1 /sim_on, 2 /sim_off, pass ${passMs.toFixed(0)} ms, reload-safe`);
+console.log(`OK: ${indices.length} /index, 15 resets, 1 /sim_on, 2 /sim_off, pass ${passMs.toFixed(0)} ms, reload-safe, cross-site refused`);
