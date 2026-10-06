@@ -1,5 +1,6 @@
 import { SerialPort } from 'serialport';
 import { WebSocketServer } from 'ws';
+import { isLocalOrigin } from './local-origin.js';
 
 const BAUD_RATE = 115200;
 const WS_PORT = 8081;
@@ -77,7 +78,12 @@ setInterval(() => {
 }, 10);
 
 // Initialize WebSocket Server
-const wss = new WebSocketServer({ port: WS_PORT });
+// Only this machine's frontend talks to the serial bridge (see local-origin.js).
+const wss = new WebSocketServer({
+  host: '127.0.0.1',
+  port: WS_PORT,
+  verifyClient: ({ origin }) => isLocalOrigin(origin),
+});
 
 wss.on('connection', function connection(ws) {
   console.log(`Frontend connected to serial bridge on ws://localhost:${WS_PORT}`);

@@ -15,6 +15,7 @@ import { ShowPanel, ShowStateSnapshot } from './components/ShowPanel';
 
 import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
 import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
+import { spikesBetween } from './show/showMath';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
 
 // Binary search helpers removed as they were unused
@@ -47,6 +48,9 @@ const FPSCounter = () => {
 
     return <span>FPS: {fps}</span>;
 };
+
+// Show playhead → LED/sound: the most data (ms) emitted for one SHOW_STATE.
+const SHOW_OUTPUT_MAX_GAP = 30;
 
 function App() {
     const [neurons, setNeurons] = useState<Neuron[]>([]);
@@ -127,6 +131,10 @@ function App() {
     const [showState, setShowState] = useState<ShowState | null>(null);
     const showLatestRef = useRef<ShowStateSnapshot | null>(null);
     const showRunningRef = useRef(false);
+    // Latest emitFrameOutputs (it closes over neurons/sound settings), for the stable
+    // handleShowState callback; and the last show index whose spikes were emitted.
+    const emitFrameOutputsRef = useRef<(spikesInFrame: SpikeEvent[], frameTime: number) => void>(() => {});
+    const lastShowIndexRef = useRef<number | null>(null);
     const showRunning = !!showState?.running;
     const showOn = showRunning && showState?.phase === 'on';
 
@@ -167,8 +175,19 @@ function App() {
         if (!prev || prev.running !== s.running || prev.phase !== s.phase || prev.pass !== s.pass) {
             setShowState(s);
         }
-        // Existing views follow the show index (= data ms) as their playhead.
+        // Existing views follow the show index (= data ms) as their playhead, and the
+        // LED/sound outputs fire for the spikes since the last message. After a reconnect
+        // or a stall only the last SHOW_OUTPUT_MAX_GAP ms are emitted, never a backlog burst.
         if (s.running && s.phase === 'on' && s.index !== null) {
+            const last = lastShowIndexRef.current;
+            const after = Math.max(
+                last !== null && last <= s.index ? last : s.config.startIndex - 1,
+                s.index - SHOW_OUTPUT_MAX_GAP,
+            );
+            if (s.index > after) {
+                emitFrameOutputsRef.current(spikesBetween(allSpikesRef.current, after, s.index), s.index);
+            }
+            lastShowIndexRef.current = s.index;
             playbackTimeRef.current = s.index;
             lastPlaybackTimeRef.current = s.index;
             const now = performance.now();
@@ -176,6 +195,8 @@ function App() {
                 setPlaybackTime(s.index);
                 lastUiUpdateRef.current = now;
             }
+        } else {
+            lastShowIndexRef.current = null;
         }
     }, []);
 
@@ -634,6 +655,82 @@ function App() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [endTime]);
 
+    // Side outputs for the spikes fired since the previous frame: the recent-neuron trail
+    // (OSC /x /y), click/bass sound and the Arduino LED stream. Fed by local playback and
+    // by the show playhead.
+    const emitFrameOutputs = (spikesInFrame: SpikeEvent[], frameTime: number) => {
+        // Update Recent Neurons for OSC
+        if (spikesInFrame.length > 0) {
+            spikesInFrame.forEach(s => {
+                const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
+                if (n) {
+                    recentFiringNeuronsRef.current.push(n);
+                }
+            });
+            // Keep last 5
+            if (recentFiringNeuronsRef.current.length > 5) {
+                recentFiringNeuronsRef.current = recentFiringNeuronsRef.current.slice(-5);
+            }
+        }
+
+        // Play sound for spikes in this frame
+        if (soundEnabled && spikesInFrame.length > 0) {
+            const spikeCount = spikesInFrame.length;
+            if (spikeCount > 0) {
+                playMultipleClicks(spikeCount, 10);
+
+                // Check for synchronized burst (multiple neurons firing together)
+                const uniqueNeurons = new Set(spikesInFrame.map(s => s.neuron_id)).size;
+                if (uniqueNeurons >= burstThreshold) {
+                    const timeSinceLastBurst = frameTime - lastBurstTimeRef.current;
+                    if (timeSinceLastBurst > 200) { // Prevent multiple bass hits too close
+                        playBassPulse(uniqueNeurons / burstThreshold);
+                        lastBurstTimeRef.current = frameTime;
+                    }
+                }
+            }
+        }
+
+        // Serial Arduino Output
+        if (serialWsRef.current && serialWsRef.current.readyState === WebSocket.OPEN) {
+            const uniqueSpikingNeurons = new Set(spikesInFrame.map(s => s.neuron_id)).size;
+            const isBurst = uniqueSpikingNeurons > 5;
+
+            const { minX, maxX, minY, maxY } = neuronBoundsRef.current;
+            const rangeX = maxX - minX || 1;
+            const rangeY = maxY - minY || 1;
+
+            let firings = [];
+            if (isBurst) {
+                // Send all correlating neurons for the geometric pattern
+                firings = spikesInFrame.map(s => {
+                    const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
+                    if (n) {
+                        const normX = (n.x - minX) / rangeX;
+                        const normY = (n.y - minY) / rangeY;
+                        return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
+                    }
+                    return null;
+                }).filter(Boolean);
+            } else {
+                // Send only recent firings for layer 1
+                firings = recentFiringNeuronsRef.current.map(n => {
+                    const normX = (n.x - minX) / rangeX;
+                    const normY = (n.y - minY) / rangeY;
+                    return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
+                });
+            }
+
+            if (isBurst || firings.length > 0) {
+                serialWsRef.current.send(JSON.stringify({
+                    type: 'SERIAL_SYNC',
+                    payload: { isBurst, firings }
+                }));
+            }
+        }
+    };
+    emitFrameOutputsRef.current = emitFrameOutputs;
+
     // Slow Motion State
     const timeDriftRef = useRef(0); // Ms behind real-time
     const currentSpeedRef = useRef(1); // Actual playback speed multiplier
@@ -726,76 +823,8 @@ function App() {
                     s => s.timestamp_ms > lastPlaybackTimeRef.current && s.timestamp_ms <= next
                 );
 
-                // Update Recent Neurons for OSC
-                if (spikesInFrame.length > 0) {
-                    spikesInFrame.forEach(s => {
-                        const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
-                        if (n) {
-                            recentFiringNeuronsRef.current.push(n);
-                        }
-                    });
-                    // Keep last 5
-                    if (recentFiringNeuronsRef.current.length > 5) {
-                        recentFiringNeuronsRef.current = recentFiringNeuronsRef.current.slice(-5);
-                    }
-                }
-
-                // Play sound for spikes in this frame
-                if (soundEnabled && spikesInFrame.length > 0) {
-                    const spikeCount = spikesInFrame.length;
-                    if (spikeCount > 0) {
-                        playMultipleClicks(spikeCount, 10);
-
-                        // Check for synchronized burst (multiple neurons firing together)
-                        const uniqueNeurons = new Set(spikesInFrame.map(s => s.neuron_id)).size;
-                        if (uniqueNeurons >= burstThreshold) {
-                            const timeSinceLastBurst = next - lastBurstTimeRef.current;
-                            if (timeSinceLastBurst > 200) { // Prevent multiple bass hits too close
-                                playBassPulse(uniqueNeurons / burstThreshold);
-                                lastBurstTimeRef.current = next;
-                            }
-                        }
-                    }
-                }
+                emitFrameOutputs(spikesInFrame, next);
                 lastPlaybackTimeRef.current = next;
-
-                // Serial Arduino Output
-                if (serialWsRef.current && serialWsRef.current.readyState === WebSocket.OPEN) {
-                    const uniqueSpikingNeurons = new Set(spikesInFrame.map(s => s.neuron_id)).size;
-                    const isBurst = uniqueSpikingNeurons > 5;
-                    
-                    const { minX, maxX, minY, maxY } = neuronBoundsRef.current;
-                    const rangeX = maxX - minX || 1;
-                    const rangeY = maxY - minY || 1;
-                    
-                    let firings = [];
-                    if (isBurst) {
-                        // Send all correlating neurons for the geometric pattern
-                        firings = spikesInFrame.map(s => {
-                            const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
-                            if (n) {
-                                const normX = (n.x - minX) / rangeX;
-                                const normY = (n.y - minY) / rangeY;
-                                return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
-                            }
-                            return null;
-                        }).filter(Boolean);
-                    } else {
-                        // Send only recent firings for layer 1
-                        firings = recentFiringNeuronsRef.current.map(n => {
-                            const normX = (n.x - minX) / rangeX;
-                            const normY = (n.y - minY) / rangeY;
-                            return { x: Math.round(normX * 15), y: Math.round(normY * 15) };
-                        });
-                    }
-
-                    if (isBurst || firings.length > 0) {
-                        serialWsRef.current.send(JSON.stringify({
-                            type: 'SERIAL_SYNC',
-                            payload: { isBurst, firings }
-                        }));
-                    }
-                }
 
                 // Send OSC output (current row index + neuron coords)
                 if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {

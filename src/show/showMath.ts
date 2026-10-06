@@ -58,3 +58,12 @@ export function cueLabel(address: string): string {
     const name = address.replace(/^\/sim_reset/, '').replace(/^\//, '');
     return (name.charAt(0) || '•').toUpperCase();
 }
+
+/** Spikes with after < timestamp_ms <= upTo (spikes sorted ascending). */
+export function spikesBetween(spikes: SpikeEvent[], after: number, upTo: number): SpikeEvent[] {
+    const out: SpikeEvent[] = [];
+    for (let i = lowerBound(spikes, after); i < spikes.length && spikes[i].timestamp_ms <= upTo; i++) {
+        if (spikes[i].timestamp_ms > after) out.push(spikes[i]);
+    }
+    return out;
+}

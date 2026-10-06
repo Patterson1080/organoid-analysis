@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lowerBound, extrapolateIndex, formatClock, rateBins, cyclePosition, phaseRemainingMs, cueLabel } from './showMath.ts';
+import { lowerBound, extrapolateIndex, formatClock, rateBins, cyclePosition, phaseRemainingMs, cueLabel, spikesBetween } from './showMath.ts';
 import type { ShowState, SpikeEvent } from '../types';
 
 const spikes: SpikeEvent[] = [10, 20, 20, 30, 1000].map((t, i) => ({ timestamp_ms: t, neuron_id: i }));
@@ -60,4 +60,11 @@ test('cueLabel abbreviates reset addresses', () => {
     assert.equal(cueLabel('/sim_resetPhysarum'), 'P');
     assert.equal(cueLabel('/palette_next'), 'P');
     assert.equal(cueLabel(''), '•');
+});
+
+test('spikesBetween returns spikes in (after, upTo]', () => {
+    assert.deepEqual(spikesBetween(spikes, 20, 30).map(s => s.timestamp_ms), [30]);
+    assert.deepEqual(spikesBetween(spikes, 19, 20).map(s => s.timestamp_ms), [20, 20]);
+    assert.deepEqual(spikesBetween(spikes, -1, 10).map(s => s.timestamp_ms), [10]);
+    assert.deepEqual(spikesBetween(spikes, 30, 999), []);
 });

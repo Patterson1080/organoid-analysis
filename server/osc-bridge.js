@@ -31,9 +31,12 @@ let oscOut = {
 
 // Show mode: the bridge owns the show clock (show-runner.js), so a reloaded or
 // backgrounded tab can't stall /index. Sends go to whichever oscClients are current.
+// SHOW_STATE goes out every tick (60 Hz, localhost): the browser drives the LED
+// matrices and sound from these messages, which keep arriving when its tab is hidden.
 const show = createShowRunner({
     send: sendToAll,
     onState: broadcastShowState,
+    broadcastEvery: 1,
 });
 let lastShowLog = '';
 
