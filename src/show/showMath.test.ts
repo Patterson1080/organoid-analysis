@@ -10,7 +10,7 @@ const base: ShowState = {
         startIndex: 0, endIndex: 179999, fps: 60, offSeconds: 120, fadeSeconds: 5, indexAddress: '/index',
         passStartCue: '/sim_resetSimsOnly', onAddress: '/sim_on', offAddress: '/sim_off', spreadCues: [],
     },
-    cues: [], timing: { passFrames: 180000, passMs: 3_000_000, cycleMs: 3_120_000 }, destinations: [],
+    cues: [], timing: { passFrames: 180000, passMs: 3_000_000, cycleMs: 3_120_000 }, destinations: [], leds: false,
 };
 
 test('lowerBound finds the first spike at or after t', () => {

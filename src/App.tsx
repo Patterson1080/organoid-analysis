@@ -16,6 +16,8 @@ import { ShowPanel, ShowStateSnapshot } from './components/ShowPanel';
 import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
 import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
 import { spikesBetween } from './show/showMath';
+import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledFrame';
+import { parseNeuronCSV, parseSpikeCSV } from './utils/dataProcessing';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
 
 // Binary search helpers removed as they were unused
@@ -48,9 +50,6 @@ const FPSCounter = () => {
 
     return <span>FPS: {fps}</span>;
 };
-
-// Show playhead → LED/sound: the most data (ms) emitted for one SHOW_STATE.
-const SHOW_OUTPUT_MAX_GAP = 30;
 
 function App() {
     const [neurons, setNeurons] = useState<Neuron[]>([]);
@@ -176,14 +175,10 @@ function App() {
             setShowState(s);
         }
         // Existing views follow the show index (= data ms) as their playhead, and the
-        // LED/sound outputs fire for the spikes since the last message. After a reconnect
-        // or a stall only the last SHOW_OUTPUT_MAX_GAP ms are emitted, never a backlog burst.
+        // sound/LED outputs fire for the spikes since the last message (never a backlog
+        // burst after a reconnect or a stall, see showOutputAfter).
         if (s.running && s.phase === 'on' && s.index !== null) {
-            const last = lastShowIndexRef.current;
-            const after = Math.max(
-                last !== null && last <= s.index ? last : s.config.startIndex - 1,
-                s.index - SHOW_OUTPUT_MAX_GAP,
-            );
+            const after = showOutputAfter(lastShowIndexRef.current, s.index, s.config.startIndex);
             if (s.index > after) {
                 emitFrameOutputsRef.current(spikesBetween(allSpikesRef.current, after, s.index), s.index);
             }
@@ -426,22 +421,16 @@ function App() {
         }
     }, []);
 
+    const neuronById = useMemo(() => neuronsById(neurons), [neurons]);
+
     const maxNeuronId = useMemo(
         () => neurons.reduce((m, n) => Math.max(m, n.neuron_id), 0) || 131,
         [neurons],
     );
 
     const handleNeuronsLoaded = (loadedNeurons: Neuron[]) => {
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        loadedNeurons.forEach(n => {
-            if (n.x < minX) minX = n.x;
-            if (n.x > maxX) maxX = n.x;
-            if (n.y < minY) minY = n.y;
-            if (n.y > maxY) maxY = n.y;
-        });
-        if (minX !== Infinity) {
-            neuronBoundsRef.current = { minX, maxX, minY, maxY };
-        }
+        const bounds = neuronBounds(loadedNeurons);
+        if (bounds) neuronBoundsRef.current = bounds;
         setNeurons(loadedNeurons);
         setShowOrganoid(true);
     };
@@ -481,6 +470,32 @@ function App() {
         }
         setShowSpikeAnalysis(true);
     };
+
+    // The show dataset from the bridge's data/ folder, loaded once per page when nothing was
+    // uploaded, so a reloaded tab gets its views and raster back without re-uploading.
+    const [bridgeDataStatus, setBridgeDataStatus] = useState<string | null>(null);
+    const bridgeDataTriedRef = useRef(false);
+    useEffect(() => {
+        if (!wsConnected || bridgeDataTriedRef.current) return;
+        bridgeDataTriedRef.current = true;
+        const base = 'http://127.0.0.1:8080/data';
+        const fetchCsv = async (name: string) => {
+            const res = await fetch(`${base}/${name}`);
+            if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+            return new File([await res.blob()], name, { type: 'text/csv' });
+        };
+        (async () => {
+            const status = await (await fetch(`${base}/status`)).json();
+            if (!status.neurons && !status.spikes) return;
+            setBridgeDataStatus('Loading data/ from the bridge…');
+            if (status.neurons && neurons.length === 0) handleNeuronsLoaded(await parseNeuronCSV(await fetchCsv('neurons.csv')));
+            if (status.spikes && allSpikesRef.current.length === 0) handleSpikesLoaded(await parseSpikeCSV(await fetchCsv('spikes.csv')));
+            setBridgeDataStatus('✓ Loaded data/ from the bridge');
+        })().catch(e => {
+            console.error('data/ autoload failed:', e);
+            setBridgeDataStatus('data/ autoload failed: upload the CSVs');
+        });
+    }, [wsConnected]);
 
     // Filter visible spikes when window changes
     useEffect(() => {
@@ -659,18 +674,13 @@ function App() {
     // (OSC /x /y), click/bass sound and the Arduino LED stream. Fed by local playback and
     // by the show playhead.
     const emitFrameOutputs = (spikesInFrame: SpikeEvent[], frameTime: number) => {
-        // Update Recent Neurons for OSC
-        if (spikesInFrame.length > 0) {
-            spikesInFrame.forEach(s => {
-                const n = neurons.find(neuron => neuron.neuron_id === s.neuron_id);
-                if (n) {
-                    recentFiringNeuronsRef.current.push(n);
-                }
-            });
-            if (recentFiringNeuronsRef.current.length > 5) {
-                recentFiringNeuronsRef.current = recentFiringNeuronsRef.current.slice(-5);
-            }
-        }
+        const { trail, frame } = ledStep(
+            recentFiringNeuronsRef.current,
+            spikesInFrame.map(s => s.neuron_id),
+            neuronById,
+            neuronBoundsRef.current,
+        );
+        recentFiringNeuronsRef.current = trail;
 
         // Play sound for spikes in this frame
         if (soundEnabled && spikesInFrame.length > 0) {
@@ -687,35 +697,11 @@ function App() {
             }
         }
 
-        // Serial Arduino Output
-        if (serialWsRef.current && serialWsRef.current.readyState === WebSocket.OPEN) {
-            const uniqueSpikingNeurons = new Set(spikesInFrame.map(s => s.neuron_id)).size;
-            const isBurst = uniqueSpikingNeurons > 5;
-
-            const { minX, maxX, minY, maxY } = neuronBoundsRef.current;
-            const rangeX = maxX - minX || 1;
-            const rangeY = maxY - minY || 1;
-            // Neuron position → 0–15 grid cell on the LED matrix.
-            const toCell = (n: Neuron) => ({
-                x: Math.round(((n.x - minX) / rangeX) * 15),
-                y: Math.round(((n.y - minY) / rangeY) * 15),
-            });
-
-            const firings = isBurst
-                // Send all correlating neurons for the geometric pattern
-                ? spikesInFrame
-                    .map(s => neurons.find(neuron => neuron.neuron_id === s.neuron_id))
-                    .filter((n): n is Neuron => n !== undefined)
-                    .map(toCell)
-                // Send only recent firings for layer 1
-                : recentFiringNeuronsRef.current.map(toCell);
-
-            if (isBurst || firings.length > 0) {
-                serialWsRef.current.send(JSON.stringify({
-                    type: 'SERIAL_SYNC',
-                    payload: { isBurst, firings }
-                }));
-            }
+        // Serial Arduino output. During a show the bridge lights the LEDs itself when it has
+        // data/ (SHOW_STATE.leds), so the page stays quiet to keep one source.
+        const bridgeDrivesLeds = showRunningRef.current && !!showLatestRef.current?.state.leds;
+        if (frame && !bridgeDrivesLeds && serialWsRef.current && serialWsRef.current.readyState === WebSocket.OPEN) {
+            serialWsRef.current.send(JSON.stringify({ type: 'SERIAL_SYNC', payload: frame }));
         }
     };
     emitFrameOutputsRef.current = emitFrameOutputs;
@@ -870,6 +856,9 @@ function App() {
                 <div className="controls-section">
                     <div className="grid-cell">
                         <FileUploader onNeuronsLoaded={handleNeuronsLoaded} onSpikesLoaded={handleSpikesLoaded} />
+                        {bridgeDataStatus && (
+                            <div className="status-text" style={{ marginTop: 'var(--space-sm)' }}>{bridgeDataStatus}</div>
+                        )}
                     </div>
 
                     {/* Time Filter & Playback Controls */}

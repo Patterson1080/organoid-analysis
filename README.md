@@ -230,14 +230,24 @@ Runs the EoC-biomes installation by itself: the **SHOW** panel (top of the views
 
 - `/index` is data milliseconds = the EoC firing-blob frame. A pass is locked to the wall clock: exactly 50:00; a late tick sends the frames it skipped, so receivers see every index.
 - Every message goes to every Output IP — e.g. `192.168.1.5:1234, 192.168.1.7:9000` sends the show to EoC and to the audio Mac mini.
-- The Arduino LED matrices (serial bridge) and the SOUND clicks follow the show's playhead too (driven from the bridge's per-tick `SHOW_STATE`, so they keep going with the tab in the background).
+- The Arduino LED matrices follow the show's playhead. With `data/` set up (below) the bridge drives them itself, so they keep going with the tab hidden, reloaded or closed (HUD `LED BRIDGE`); without it the open tab drives them (`LED TAB`). The SOUND clicks always come from the tab.
 - Range, index rate, off time, fade and reset counts are editable while stopped.
 - While the show runs, local playback, scrubbing and `/row` input are locked; the bridge is the only `/index` sender. The other views follow the show's playhead.
 - HUD: `PASS 3 · ▶ ON · IDX 091204 / 179999 · OFF IN 24:47 · → 192.168.1.5:1234` — check the destination before starting.
 - Restarting the bridge stops the show; press START SHOW again.
-- Reloading the tab keeps the show running (the bridge owns it) but drops the loaded CSVs: load them again, or the LED matrices, sound and raster stay quiet.
+- Reloading the tab keeps the show running (the bridge owns it); the page reloads `data/` by itself and picks up the current playhead. Uploaded CSVs (no `data/`) are lost on reload and must be loaded again.
 - The bridges only accept WebSocket connections from this machine's pages (loopback + Origin check).
-- `node scripts/show-smoke.mjs` (with no bridge running) checks the whole loop end to end against a local OSC listener.
+- `node scripts/show-smoke.mjs` (with no bridges running) checks the whole loop end to end against a local OSC listener and a fake serial bridge.
+
+**Show data (`data/`)** — point the app at the recording once, so neither the bridge nor a reloaded tab needs an upload:
+
+```bash
+mkdir -p data
+ln -s ~/Developer/Graphics/TD_biomes/data/labels_positions.csv data/neurons.csv
+ln -s ~/Developer/Fabrication/PDE_SimulacraNaturae/data/organoid/time_series_data.csv data/spikes.csv
+```
+
+The bridge reads both at startup (about a second for the 612 MB matrix) and serves them to the page (`http://127.0.0.1:8080/data/`, local pages only), which loads them on connect when nothing was uploaded. A manual upload still works for other datasets. `data/` is gitignored.
 
 EoC needs the `/sim_off` · `/sim_on` handlers from its `show-sim-off` branch.
 

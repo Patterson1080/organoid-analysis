@@ -52,12 +52,13 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     if (!connected) return 'BRIDGE OFFLINE · start it with npm start';
     if (!st) return 'WAITING FOR BRIDGE…';
     const dest = st.destinations.length ? `→ ${st.destinations.join(', ')}` : '→ NO DESTINATION';
-    if (!st.running) return `STOPPED · ${dest}`;
+    const tail = `LED ${st.leds ? 'BRIDGE' : 'TAB'} · ${dest}`;
+    if (!st.running) return `STOPPED · ${tail}`;
     const left = formatClock(phaseRemainingMs(st, since));
-    if (st.phase === 'off') return `PASS ${st.pass} · ■ OFF · ON IN ${left} · ${dest}`;
+    if (st.phase === 'off') return `PASS ${st.pass} · ■ OFF · ON IN ${left} · ${tail}`;
     const end = st.config.endIndex;
     const idx = String(Math.floor(extrapolateIndex(st, since) ?? 0)).padStart(String(end).length, '0');
-    return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${dest}`;
+    return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
 export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop }: ShowPanelProps) {

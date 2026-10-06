@@ -66,4 +66,5 @@ export interface ShowState {
     cues: ShowCue[];
     timing: { passFrames: number; passMs: number; cycleMs: number };
     destinations: string[];
+    leds: boolean; // the bridge is driving the LED matrices from data/
 }
