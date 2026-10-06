@@ -78,6 +78,9 @@ Arg types: `/index` int; reset cues int `1` (as the tester); `/sim_on` / `/sim_o
   `{ running, pass, phase, index, phaseElapsedMs, phaseDurationMs, config, cues, destinations: ['ip:port', …] }`.
 - Show `/index` sends go through `oscOut.timeAddress`; the `timeEnabled` checkbox does not gate them (show mode needs `/index`).
 - Bridge restart = show stops (no persistence). Operator presses START again.
+- Default OSC output port is `1234` (EoC's port), in the bridge and the UI.
+- Reload safety: a (re)connecting tab marks its first `CONFIG` as `initial`. While the show runs the bridge ignores that push (a fresh tab may only know defaults) and replies `OSC_CONFIG` with its live settings, which the tab adopts. Edits made by hand mid-show still apply. The UI also saves its OSC Bridge settings in `localStorage`, so a reload restores them.
+- While running, the bridge drops `OSC_BUNDLE` / `OSC_SEND` from any tab — one `/index` sender even with a second tab open.
 
 ### Frontend
 
@@ -97,6 +100,7 @@ Arg types: `/index` int; reset cues int `1` (as the tester); `/sim_on` / `/sim_o
 - `playbackTimeRef = index` on each state (ON); `setPlaybackTime` throttled to ~10 Hz — existing views (Circular, 3D, Real-Time) follow the show.
 - Local transport locked: `isPlaying` forced false; PLAY / step / STOP buttons, circular center-tap and scrub disabled; local `OSC_BUNDLE` sends gated; incoming `/row` ignored. Exactly one `/index` sender.
 - `/x1../y1` neuron coords are not sent during the show (bridge has no spike data).
+- STOP SHOW takes two clicks within 3 s (it blacks out the room).
 
 ## EoC-biomes-compute changes (branch `show-sim-off`, own files only — leave the uncommitted 11.3 scene/params/tools edits alone)
 
