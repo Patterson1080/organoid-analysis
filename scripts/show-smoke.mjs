@@ -56,8 +56,9 @@ async function next(ws, type) {
 }
 
 // GET from the bridge's HTTP side with a given Origin → { status, origin header, body }.
-const get = (urlPath, origin) => new Promise((resolve, reject) => {
-    http.get({ host: '127.0.0.1', port: 8080, path: urlPath, headers: origin ? { Origin: origin } : {} }, res => {
+const get = (urlPath, origin, host) => new Promise((resolve, reject) => {
+    const headers = { ...(origin && { Origin: origin }), ...(host && { Host: host }) };
+    http.get({ host: '127.0.0.1', port: 8080, path: urlPath, headers }, res => {
         let body = '';
         res.on('data', d => { body += d; });
         res.on('end', () => resolve({ status: res.statusCode, allow: res.headers['access-control-allow-origin'], body }));
@@ -100,6 +101,7 @@ if (status.status !== 200 || status.allow !== 'http://localhost:5173' || status.
 }
 if ((await get('/data/neurons.csv', 'http://localhost:5173')).body !== neuronsCsv) fail('neurons.csv not served as-is');
 if ((await get('/data/spikes.csv', 'https://evil.example')).status !== 403) fail('data served to a cross-site page');
+if ((await get('/data/spikes.csv', undefined, 'evil.example:8080')).status !== 403) fail('data served to a rebound host name');
 
 // The bridge has loaded data/ and linked the serial bridge: it drives the LEDs.
 let leds = first.leds;
@@ -165,7 +167,8 @@ if (indices.length < 55 || indices.at(-1) !== 59) fail(`index stream ${indices.l
 if (count('/sim_resetTermites') !== 5 || count('/sim_resetPhysarum') !== 10) fail('spread resets missing');
 const passMs = received.find(m => m.address === '/sim_off').at - received.find(m => m.address === '/index').at;
 if (passMs < 950 || passMs > 1150) fail(`pass took ${passMs.toFixed(0)} ms`);
-if (ledFrames.length < 50) fail(`bridge sent ${ledFrames.length} LED frames during the pass`);
+// One LED frame per tick (a late tick covers several ms), so fewer than 60 under load.
+if (ledFrames.length < 30) fail(`bridge sent ${ledFrames.length} LED frames during the pass`);
 if (!ledFrames.some(f => f.isBurst && f.firings.length === 8)) fail('the 8-neuron burst at 30 ms never lit');
 console.log(`OK: ${indices.length} /index, 15 resets, 1 /sim_on, 2 /sim_off, pass ${passMs.toFixed(0)} ms, reload-safe, cross-site refused, ` +
     `bad port dropped, inbound OSC shaped, data/ served locally, ${ledFrames.length} LED frames from the bridge`);

@@ -1,6 +1,6 @@
 import { SerialPort } from 'serialport';
 import { WebSocketServer } from 'ws';
-import { isLocalOrigin } from './local-origin.js';
+import { isLocalHost, isLocalOrigin } from './local-origin.js';
 
 const BAUD_RATE = 115200;
 const WS_PORT = 8081;
@@ -82,7 +82,7 @@ setInterval(() => {
 const wss = new WebSocketServer({
   host: '127.0.0.1',
   port: WS_PORT,
-  verifyClient: ({ origin }) => isLocalOrigin(origin),
+  verifyClient: ({ origin, req }) => isLocalOrigin(origin) && isLocalHost(req.headers.host),
 });
 
 wss.on('connection', function connection(ws) {

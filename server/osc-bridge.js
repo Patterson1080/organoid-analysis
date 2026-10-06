@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Client, Server } from 'node-osc';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createShowRunner } from './show-runner.js';
-import { isLocalOrigin } from './local-origin.js';
+import { isLocalHost, isLocalOrigin } from './local-origin.js';
 import { loadNeurons, loadSpikeFrames, spikeIdsBetween } from './show-data.js';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from '../src/show/ledFrame.ts';
 
@@ -65,7 +65,7 @@ function startWsServer() {
     const httpServer = http.createServer(serveData);
     wsServer = new WebSocketServer({
         server: httpServer,
-        verifyClient: ({ origin }) => isLocalOrigin(origin),
+        verifyClient: ({ origin, req }) => isLocalOrigin(origin) && isLocalHost(req.headers.host),
     });
     httpServer.listen(WS_PORT, '127.0.0.1');
     console.log(`WebSocket bridge running on ws://127.0.0.1:${WS_PORT} (data on http://127.0.0.1:${WS_PORT}/data/)`);
@@ -122,10 +122,10 @@ function broadcast(message) {
 }
 
 // GET /data/status, /data/neurons.csv, /data/spikes.csv — the page loads the show dataset
-// from here on connect, so a reloaded tab needs no re-upload. Local pages only.
+// from here on connect, so a reloaded tab needs no re-upload. Local pages and hosts only.
 function serveData(req, res) {
     const origin = req.headers.origin;
-    if (!isLocalOrigin(origin)) {
+    if (!isLocalOrigin(origin) || !isLocalHost(req.headers.host)) {
         res.writeHead(403).end();
         return;
     }
