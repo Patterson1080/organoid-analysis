@@ -230,7 +230,7 @@ Runs the EoC-biomes installation by itself: the **SHOW** panel (top of the views
 
 - `/index` is data milliseconds = the EoC firing-blob frame. A pass is locked to the wall clock: exactly 50:00; a late tick sends the frames it skipped, so receivers see every index.
 - Every message goes to every Output IP — e.g. `192.168.1.5:1234, 192.168.1.7:9000` sends the show to EoC and to the audio Mac mini.
-- The Arduino LED matrices follow the show's playhead. With `data/` set up (below) the bridge drives them itself, so they keep going with the tab hidden, reloaded or closed (HUD `LED BRIDGE`); without it the open tab drives them (`LED TAB`). The SOUND clicks always come from the tab.
+- The Arduino LED matrices follow the show's playhead. With `data/` set up (below) the bridge drives them itself, so they keep going with the tab hidden, reloaded or closed (HUD `LED BRIDGE`); without it the open tab drives them (`LED TAB`). The SOUND clicks always come from the tab. The show sends no LED frames during OFF or before a pass's first spike (the recording is silent for its first 686 ms, ~11 s of show time); after 0.5 s without frames the `DualLED_Currents` sketch shows its bright white idle shimmer.
 - Range, index rate, off time, fade and reset counts are editable while stopped.
 - While the show runs, local playback, scrubbing and `/row` input are locked; the bridge is the only `/index` sender. The other views follow the show's playhead.
 - HUD: `PASS 3 · ▶ ON · IDX 091204 / 179999 · OFF IN 24:47 · → 192.168.1.5:1234` — check the destination before starting.
