@@ -133,3 +133,10 @@ README: Show Mode section (cycle table, OSC contract, operator steps). New `docs
 ## Out of scope
 
 Show persistence across bridge restarts; auto-start on launch; `/x` `/y` coords during the show; Electron (`electron/main.cjs` references bridge functions it doesn't define — untouched).
+
+## Amendments (during execution)
+
+- **Frame fill.** A late tick sends every frame it skipped, in order, each followed by its cues (≤ 30 frames; a longer gap such as machine sleep jumps and fires the jumped cues once). Receivers see every index at 60/s on average; the pass stays wall-clock locked.
+- **Hardening.** The bridge WebSocket (and the serial bridge's) listens on 127.0.0.1 only; `normalizeConfig` caps fps (1000), indices (1e8), seconds (86400), cue counts (1000) and spread-cue entries (32).
+- **Audio Mac mini.** Gets the show by being one more Output IP (`ip:port`); every message goes to every destination.
+- **LED matrices + sound.** Driven from the show playhead: the bridge broadcasts `SHOW_STATE` every tick; App feeds the spikes since the previous message to the same per-frame output path local playback uses (serial `SERIAL_SYNC`, clicks/bass, recent-neuron trail), capped at 30 ms of data per message so a reconnect never bursts a backlog.
