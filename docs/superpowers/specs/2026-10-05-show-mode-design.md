@@ -140,3 +140,13 @@ Show persistence across bridge restarts; auto-start on launch; `/x` `/y` coords 
 - **Hardening.** The bridge WebSocket (and the serial bridge's) listens on 127.0.0.1 only; `normalizeConfig` caps fps (1000), indices (1e8), seconds (86400), cue counts (1000) and spread-cue entries (32).
 - **Audio Mac mini.** Gets the show by being one more Output IP (`ip:port`); every message goes to every destination.
 - **LED matrices + sound.** Driven from the show playhead: the bridge broadcasts `SHOW_STATE` every tick; App feeds the spikes since the previous message to the same per-frame output path local playback uses (serial `SERIAL_SYNC`, clicks/bass, recent-neuron trail), capped at 30 ms of data per message so a reconnect never bursts a backlog.
+
+## Amendment 2026-10-06 — data/ autoload + LEDs from the bridge
+
+Goal: a tab reload or close must not silence the LED matrices or lose the dataset.
+
+- `data/neurons.csv` + `data/spikes.csv` (gitignored; symlinks to the real files). `ORGANOID_DATA_DIR` overrides the folder (tests).
+- The OSC bridge serves them on its port (HTTP on 8080, WebSocket attached): `GET /data/status`, `/data/neurons.csv`, `/data/spikes.csv`; local Origins only. The page fetches and parses them through the existing parsers on connect when nothing is loaded; manual upload still overrides.
+- The bridge loads the same files at startup (neuron positions; spike matrix → neuron ids per ms) and, on every show tick, builds the LED frame and sends `SERIAL_SYNC` to the serial bridge (WebSocket client to 127.0.0.1:8081, reconnecting). `SHOW_STATE.leds` is true while it does; the page then sends no serial during the show. Outside the show, local playback drives the LEDs from the page as before.
+- LED logic is one shared module, `src/show/ledFrame.ts` (trail of 5, burst when > 5 neurons fire in a frame, 0–15 grid cells, ≤ 30 ms of data per tick), imported by the page and by Node (native type stripping). Neuron CSV row parsing is shared the same way (`src/utils/neuronRows.ts`).
+- Startup parse of the 612 MB matrix may take a while; the show can start before it finishes and LEDs join once loaded.
