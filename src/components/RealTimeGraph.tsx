@@ -12,6 +12,7 @@ interface RealTimeGraphProps {
     width?: number;
     height?: number;
     targetDuration?: number; // In seconds
+    presentation?: boolean; // scale to the parent's width (crisp), no export controls
 }
 
 type GraphMode = 'NORMAL' | 'STROBE_IN' | 'FOCUS' | 'STROBE_OUT';
@@ -220,9 +221,16 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
     threshold,
     width = 800,
     height = 400,
-    targetDuration = 0 // Default to 0 (use data length)
+    targetDuration = 0, // Default to 0 (use data length)
+    presentation = false
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const wrapRef = useRef<HTMLDivElement>(null);
+    // The graph is always drawn in width×height units; in presentation the box is scaled
+    // to its parent (displayScale = CSS px per unit) and the backing store follows it
+    // (pixelScale = device px per unit) so the small type stays sharp.
+    const [displayScale, setDisplayScale] = useState(1);
+    const pixelScale = presentation ? Math.max(1, displayScale * (window.devicePixelRatio || 1)) : 1;
     const [mode, setMode] = useState<GraphMode>('NORMAL');
     const [enableStrobe, setEnableStrobe] = useState(true);
     const modeTimerRef = useRef(0);
@@ -239,6 +247,15 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
         for (let i = 0; i < length; i++) s += randomHex();
         return s;
     };
+
+    useEffect(() => {
+        if (!presentation) { setDisplayScale(1); return; }
+        const el = wrapRef.current;
+        if (!el) return;
+        const ro = new ResizeObserver(entries => setDisplayScale(entries[0].contentRect.width / width));
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [presentation, width]);
 
     // --- Main Loop ---
     useEffect(() => {
@@ -294,6 +311,7 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
             }
 
             // --- Rendering ---
+            ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
             drawGraphFrame(
                 ctx,
                 width,
@@ -312,7 +330,7 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
 
         animationFrameId = requestAnimationFrame(render);
         return () => cancelAnimationFrame(animationFrameId);
-    }, [spikes, neurons, currentTime, isPlaying, threshold, mode, width, height]);
+    }, [spikes, neurons, currentTime, isPlaying, threshold, mode, width, height, pixelScale]);
 
 
     // --- Export Handlers ---
@@ -493,9 +511,10 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
 
     return (
         <div style={{ position: 'relative' }}>
-            <div style={{
-                width: width,
-                height: height,
+            <div ref={wrapRef} style={{
+                ...(presentation
+                    ? { width: `min(100%, calc(var(--pres-fit, 100vh) * ${width / height}))`, aspectRatio: `${width} / ${height}`, margin: '0 auto' }
+                    : { width: width, height: height }),
                 background: '#000',
                 border: '1px solid #333',
                 position: 'relative',
@@ -503,16 +522,16 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
             }}>
                 <canvas
                     ref={canvasRef}
-                    width={width}
-                    height={height}
-                    style={{ display: 'block' }}
+                    width={Math.round(width * pixelScale)}
+                    height={Math.round(height * pixelScale)}
+                    style={presentation ? { display: 'block', width: '100%', height: '100%' } : { display: 'block' }}
                 />
                 <div style={{
                     position: 'absolute',
-                    top: 4,
-                    left: 4,
+                    top: 4 * displayScale,
+                    left: 4 * displayScale,
                     fontFamily: 'monospace',
-                    fontSize: '7px',
+                    fontSize: `${7 * displayScale}px`,
                     color: mode === 'NORMAL' ? '#444' : '#F00'
                 }}>
                     MODE: {mode}
@@ -520,7 +539,7 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
             </div>
 
             {/* Export Controls */}
-            <div style={{ marginTop: '10px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+            {!presentation && <div style={{ marginTop: '10px', display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <button
                     className="btn"
                     onClick={() => setEnableStrobe(!enableStrobe)}
@@ -542,7 +561,7 @@ export const RealTimeGraph: React.FC<RealTimeGraphProps> = ({
                 >
                     {isExporting ? `Exporting Sequence ${exportProgress}%` : 'Export Sequence (ZIP)'}
                 </button>
-            </div>
+            </div>}
         </div>
     );
 };

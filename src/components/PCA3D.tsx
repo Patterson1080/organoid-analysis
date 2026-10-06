@@ -9,6 +9,7 @@ interface PCA3DProps {
     spikes: SpikeEvent[];
     neurons: Neuron[];
     binSizeMs?: number;
+    presentation?: boolean; // fill the parent box, axis legend overlaid on the scene
 }
 
 const PCA3DScene: React.FC<{ data: any[] }> = ({ data }) => {
@@ -57,7 +58,7 @@ const PCA3DScene: React.FC<{ data: any[] }> = ({ data }) => {
     );
 };
 
-const PCA3D: React.FC<PCA3DProps> = ({ spikes, neurons, binSizeMs = 100 }) => {
+const PCA3D: React.FC<PCA3DProps> = ({ spikes, neurons, binSizeMs = 100, presentation = false }) => {
     const pcaData = useMemo(() => {
         if (!spikes.length || !neurons.length) return [];
 
@@ -116,7 +117,10 @@ const PCA3D: React.FC<PCA3DProps> = ({ spikes, neurons, binSizeMs = 100 }) => {
     if (!pcaData.length) return <div className="text-white">No data for PCA</div>;
 
     return (
-        <div className="w-full h-96 bg-black rounded-lg overflow-hidden border border-gray-800">
+        <div
+            className="w-full h-96 bg-black rounded-lg overflow-hidden border border-gray-800"
+            style={presentation ? { position: 'relative', width: '100%', height: '100%' } : undefined}
+        >
             <Canvas camera={{ position: [3, 3, 3], fov: 45 }}>
                 <color attach="background" args={['#050505']} />
                 <ambientLight intensity={0.5} />
@@ -124,8 +128,11 @@ const PCA3D: React.FC<PCA3DProps> = ({ spikes, neurons, binSizeMs = 100 }) => {
                 <PCA3DScene data={pcaData} />
                 <OrbitControls autoRotate autoRotateSpeed={1} />
             </Canvas>
-            <div className="absolute bottom-2 left-0 right-0 text-center pointer-events-none">
-                <span className="text-xs text-gray-500">PC1 (Red) • PC2 (Green) • PC3 (Blue) | Color = Time</span>
+            <div
+                className="absolute bottom-2 left-0 right-0 text-center pointer-events-none"
+                style={presentation ? { position: 'absolute', bottom: 8, left: 0, right: 0, textAlign: 'center', pointerEvents: 'none' } : undefined}
+            >
+                <span className="text-xs text-gray-500" style={presentation ? { fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#888' } : undefined}>PC1 (Red) • PC2 (Green) • PC3 (Blue) | Color = Time</span>
             </div>
         </div>
     );

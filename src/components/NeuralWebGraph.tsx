@@ -16,6 +16,7 @@ interface NeuralWebGraphProps {
     width?: number;
     height?: number;
     exportResolution?: number;
+    presentation?: boolean; // fit the canvas to the viewport, no export buttons
 }
 export interface NeuralWebGraphHandle { exportPNG: () => void; }
 
@@ -70,7 +71,7 @@ function strokeLink(
 
 const NeuralWebGraph = forwardRef<NeuralWebGraphHandle, NeuralWebGraphProps>(({
     spikes, neurons, currentTime, startTime, endTime,
-    width = 800, height = 800, exportResolution = 2048,
+    width = 800, height = 800, exportResolution = 2048, presentation = false,
 }, ref) => {
     const canvasRef    = useRef<HTMLCanvasElement>(null);
     const rafRef       = useRef<number>(0);
@@ -787,16 +788,20 @@ const NeuralWebGraph = forwardRef<NeuralWebGraphHandle, NeuralWebGraphProps>(({
             <canvas
                 ref={canvasRef}
                 width={width} height={height}
-                style={{ width: '100%', maxWidth: width, aspectRatio: '1/1', display: 'block', background: '#000' }}
+                style={{
+                    width: presentation ? 'min(100%, var(--pres-fit))' : '100%',
+                    maxWidth: presentation ? undefined : width,
+                    aspectRatio: '1/1', display: 'block', background: '#000',
+                }}
             />
-            <div style={{ display: 'flex', gap: 8 }}>
+            {!presentation && <div style={{ display: 'flex', gap: 8 }}>
                 <button style={btnStyle} onClick={exportPNG}>
                     Export Frame PNG
                 </button>
                 <button style={btnStyle} onClick={exportSequence} disabled={isExporting}>
                     {isExporting ? `Exporting ${exportPct}%…` : 'Export Sequence (ZIP)'}
                 </button>
-            </div>
+            </div>}
         </div>
     );
 });

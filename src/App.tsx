@@ -64,6 +64,10 @@ function App() {
     const [showNeuralWeb, setShowNeuralWeb] = useState(false);
     const [showShowPanel, setShowShowPanel] = useState(true);
 
+    // Presentation view: only the open visualizations, laid out to the viewport (fullscreen
+    // when the browser allows it). Exit with the small icon at the bottom or Esc twice.
+    const [presentation, setPresentation] = useState(false);
+    const [presentationHint, setPresentationHint] = useState(false);
 
     const allSpikesRef = useRef<SpikeEvent[]>([]);
 
@@ -670,6 +674,55 @@ function App() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [endTime]);
 
+    const enterPresentation = useCallback(() => {
+        setPresentation(true);
+        setPresentationHint(true);
+        const root = document.documentElement;
+        if (!document.fullscreenElement && root.requestFullscreen) {
+            // Keyboard Lock (Chromium) hands single Esc presses to the page instead of
+            // leaving fullscreen, so the double-Esc exit works; holding Esc still leaves.
+            root.requestFullscreen()
+                .then(() => (navigator as any).keyboard?.lock?.(['Escape']))
+                .catch(() => { /* fullscreen refused: present in the window */ });
+        }
+    }, []);
+
+    const exitPresentation = useCallback(() => {
+        setPresentation(false);
+        setPresentationHint(false);
+        (navigator as any).keyboard?.unlock?.();
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    }, []);
+
+    useEffect(() => {
+        if (!presentation) return;
+        const DOUBLE_PRESS_MS = 800;
+        let lastEsc = -Infinity;
+        const escPressed = () => {
+            const now = performance.now();
+            if (now - lastEsc < DOUBLE_PRESS_MS) exitPresentation();
+            else lastEsc = now;
+        };
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape') return;
+            e.preventDefault();
+            escPressed();
+        };
+        // Without Keyboard Lock the browser eats the first Esc to leave fullscreen; count
+        // that as the first press so Esc Esc still exits.
+        const onFullscreenChange = () => {
+            if (!document.fullscreenElement) escPressed();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        document.addEventListener('fullscreenchange', onFullscreenChange);
+        const hintTimer = setTimeout(() => setPresentationHint(false), 3000);
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+            document.removeEventListener('fullscreenchange', onFullscreenChange);
+            clearTimeout(hintTimer);
+        };
+    }, [presentation, exitPresentation]);
+
     // Side outputs for the spikes fired since the previous frame: the recent-neuron trail
     // (OSC /x /y), click/bass sound and the Arduino LED stream. Fed by local playback and
     // by the show playhead.
@@ -832,7 +885,7 @@ function App() {
     }, [isPlaying, startTime, endTime, soundEnabled, targetDuration, burstThreshold, neurons, isLooping, isReverse]);
 
     return (
-        <div className={`app-container ${isTransparent ? 'transparent-bg' : ''}`}>
+        <div className={`app-container ${isTransparent ? 'transparent-bg' : ''} ${presentation ? 'presentation' : ''}`}>
             <div className="container">
                 <header>
                     <div className="flex justify-between items-center">
@@ -842,13 +895,18 @@ function App() {
                                 Neural Activity Visualization System
                             </div>
                         </div>
-                        <div className="flex flex-col items-end">
-                            <div className="status-text">
-                                FIG 1.0 // DATA_SOURCE: LIVE
+                        <div className="flex items-center gap-lg">
+                            <div className="flex flex-col items-end">
+                                <div className="status-text">
+                                    FIG 1.0 // DATA_SOURCE: LIVE
+                                </div>
+                                <div className="status-text" style={{ color: 'var(--color-accent)', fontSize: '0.8em' }}>
+                                    <FPSCounter />
+                                </div>
                             </div>
-                            <div className="status-text" style={{ color: 'var(--color-accent)', fontSize: '0.8em' }}>
-                                <FPSCounter />
-                            </div>
+                            <button className="btn" onClick={enterPresentation} title="Show only the visualizations, fullscreen (exit: Esc twice)">
+                                ⛶ Present
+                            </button>
                         </div>
                     </div>
                 </header>
@@ -1340,7 +1398,7 @@ function App() {
 
                 <div className="viz-section">
                     {showShowPanel && (
-                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                        <div className="grid-cell pres-wide">
                             <ShowPanel
                                 spikes={allSpikesRef.current}
                                 maxNeuronId={maxNeuronId}
@@ -1349,13 +1407,15 @@ function App() {
                                 connected={wsConnected}
                                 onStart={config => sendShow({ type: 'SHOW_START', payload: { config } })}
                                 onStop={() => sendShow({ type: 'SHOW_STOP' })}
+                                presentation={presentation}
                             />
                         </div>
                     )}
 
                     {showOrganoid && neurons.length > 0 && (
-                        <div className="grid-cell">
+                        <div className="grid-cell pres-square">
                             <h2>Organoid Map (3D)</h2>
+                            <div className={presentation ? 'pres-box' : undefined}>
                             <Organoid3D
                                 neurons={neurons}
                                 spikes={visibleSpikes}
@@ -1369,12 +1429,14 @@ function App() {
                                 lastFiringCount={lastFiringCount}
                                 exportRef={exportRef}
                                 spoutEnabled={spoutEnabled}
+                                presentation={presentation}
                             />
+                            </div>
                         </div>
                     )}
 
                     {showSpikeAnalysis && visibleSpikes.length > 0 && (
-                        <div className="grid-cell">
+                        <div className="grid-cell pres-wide">
                             <div className="flex justify-between items-center" style={{ marginBottom: 'var(--space-md)' }}>
                                 <h2 style={{ margin: 0 }}>Activity Analysis</h2>
                             </div>
@@ -1382,23 +1444,27 @@ function App() {
                                 spikes={visibleSpikes}
                                 neurons={neurons}
                                 currentTime={isPlaying || showOn ? playbackTime : undefined}
+                                presentation={presentation}
                             />
                         </div>
                     )}
 
                     {showPCA && visibleSpikes.length > 0 && (
-                        <div className="grid-cell">
+                        <div className="grid-cell pres-square">
                             <h2 style={{ marginBottom: 'var(--space-md)' }}>PCA Trajectory (3D)</h2>
+                            <div className={presentation ? 'pres-box' : undefined}>
                             <PCA3D
                                 spikes={visibleSpikes}
                                 neurons={neurons}
                                 binSizeMs={100}
+                                presentation={presentation}
                             />
+                            </div>
                         </div>
                     )}
 
                     {showRealTimeGraph && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                        <div className="grid-cell pres-wide">
                             <h2 style={{ marginBottom: 'var(--space-md)' }}>REAL-TIME GRAPH</h2>
                             <RealTimeGraph
                                 spikes={allSpikesRef.current}
@@ -1409,23 +1475,25 @@ function App() {
                                 width={1200}
                                 height={400}
                                 targetDuration={targetDuration}
+                                presentation={presentation}
                             />
                         </div>
                     )}
 
                     {showHypergraphs && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                        <div className="grid-cell pres-square">
                             <HypergraphsPanel
                                 spikes={allSpikesRef.current}
                                 neurons={neurons}
                                 currentTime={playbackTime}
                                 isPlaying={isPlaying || showOn}
+                                presentation={presentation}
                             />
                         </div>
                     )}
 
                     {showCircularGraph && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                        <div className="grid-cell pres-square">
                             <CircularEventGraph
                                 spikes={allSpikesRef.current}
                                 neurons={neurons}
@@ -1434,6 +1502,7 @@ function App() {
                                 height={1200}
                                 exportResolution={2048}
                                 targetDuration={targetDuration}
+                                presentation={presentation}
                                 mode="topology"
                                 onCenterTap={() => {
                                     if (showRunningRef.current) return;
@@ -1532,7 +1601,7 @@ function App() {
                     )}
 
                     {showRegionsGraph && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                        <div className="grid-cell pres-square">
                             <CircularEventGraph
                                 spikes={allSpikesRef.current}
                                 neurons={neurons}
@@ -1541,6 +1610,7 @@ function App() {
                                 height={1200}
                                 exportResolution={2048}
                                 targetDuration={targetDuration}
+                                presentation={presentation}
                                 mode="regions"
                                 showZoomWindow={true}
                                 title="Neural_Regions_V1.0"
@@ -1642,7 +1712,7 @@ function App() {
 
 
                     {showNeuralWeb && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                        <div className="grid-cell pres-square">
                             <h2>Neural Web (Lissajous · Time Cube)</h2>
                             <NeuralWebGraph
                                 spikes={allSpikesRef.current}
@@ -1653,12 +1723,13 @@ function App() {
                                 width={1200}
                                 height={1200}
                                 exportResolution={2048}
+                                presentation={presentation}
                             />
                         </div>
                     )}
 
                     {!showOrganoid && !showSpikeAnalysis && !showPCA && !showRealTimeGraph && !showHypergraphs && (
-                        <div className="grid-cell" style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div className="grid-cell pres-wide" style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <div className="status-text" style={{ opacity: 0.5 }}>
                                 WAITING FOR DATA INPUT...
                             </div>
@@ -1670,6 +1741,22 @@ function App() {
                     <div className="status-text">Sampling Rate: 1kHz | Data-driven visualization</div>
                 </footer>
             </div>
+
+            {presentation && (
+                <>
+                    {presentationHint && <div className="presentation-hint status-text">Press Esc twice to exit</div>}
+                    <button
+                        className="presentation-exit"
+                        onClick={exitPresentation}
+                        title="Exit presentation (Esc Esc)"
+                        aria-label="Exit presentation"
+                    >
+                        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                            <path d="M6 1v5H1M10 1v5h5M6 15v-5H1M10 15v-5h5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                        </svg>
+                    </button>
+                </>
+            )}
         </div >
     );
 }

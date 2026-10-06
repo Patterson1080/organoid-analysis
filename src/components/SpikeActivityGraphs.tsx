@@ -152,17 +152,18 @@ interface SpikeActivityGraphsProps {
     spikes: SpikeEvent[];
     neurons: Neuron[];
     currentTime?: number; // Current playback time in ms (for moving indicator)
+    presentation?: boolean; // hide the toggles, size the charts to the viewport
 }
 
 // Memoized Static Charts Component
-const StaticCharts = React.memo(({ activityData, firingRateData, CustomTooltip, children, showNetworkActivity, showFiringRate }: any) => {
+const StaticCharts = React.memo(({ activityData, firingRateData, CustomTooltip, children, showNetworkActivity, showFiringRate, chartHeight }: any) => {
     return (
         <div className="grid" style={{ gridTemplateColumns: (showNetworkActivity && showFiringRate) ? '1fr 1fr' : '1fr' }}>
             {/* Network Activity Timeline */}
             {showNetworkActivity && (
                 <div className="viz-canvas" style={{ padding: 'var(--space-md)', position: 'relative' }}>
                     <div className="data-label" style={{ marginBottom: 'var(--space-md)' }}>Network Activity (100ms bins)</div>
-                    <div style={{ height: '200px', width: '100%' }}>
+                    <div style={{ height: chartHeight, width: '100%' }}>
                         <ResponsiveContainer>
                             <LineChart data={activityData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
                                 <XAxis
@@ -196,7 +197,7 @@ const StaticCharts = React.memo(({ activityData, firingRateData, CustomTooltip, 
             {showFiringRate && (
                 <div className="viz-canvas" style={{ padding: 'var(--space-md)' }}>
                     <div className="data-label" style={{ marginBottom: 'var(--space-md)' }}>Top 20 Active Neurons (Hz)</div>
-                    <div style={{ height: '200px', width: '100%' }}>
+                    <div style={{ height: chartHeight, width: '100%' }}>
                         <ResponsiveContainer>
                             <BarChart data={firingRateData}>
                                 <XAxis
@@ -230,7 +231,7 @@ const StaticCharts = React.memo(({ activityData, firingRateData, CustomTooltip, 
     );
 });
 
-export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes, neurons, currentTime }) => {
+export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes, neurons, currentTime, presentation = false }) => {
     // 1. Network Activity (Spikes over time)
     const [showNetworkActivity, setShowNetworkActivity] = useState(true);
     const [showFiringRate, setShowFiringRate] = useState(true);
@@ -306,13 +307,15 @@ export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes
     // Assuming activityData covers the full range from 0 to end
     const totalDuration = 180000; // Fixed 180s
     const cursorLeft = currentTime !== undefined ? (currentTime / totalDuration) * 100 : 0;
+    const chartHeight = presentation ? 'clamp(200px, 24dvh, 420px)' : '200px';
+    const rasterHeight = presentation ? 'clamp(360px, 55dvh, 1100px)' : '600px';
 
     return (
         <div className="data-panel">
             <h2 style={{ marginBottom: 'var(--space-lg)' }}>Spike Activity Analysis</h2>
 
             {/* Toggle Buttons */}
-            <div className="flex gap-sm" style={{ marginBottom: 'var(--space-md)' }}>
+            {!presentation && <div className="flex gap-sm" style={{ marginBottom: 'var(--space-md)' }}>
                 <button className={`btn ${showNetworkActivity ? 'active' : ''}`} onClick={() => setShowNetworkActivity(!showNetworkActivity)}>
                     {showNetworkActivity ? 'Hide Network' : 'Show Network'}
                 </button>
@@ -325,7 +328,7 @@ export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes
                 <button className={`btn ${showHeatmaps ? 'active' : ''}`} onClick={() => setShowHeatmaps(!showHeatmaps)}>
                     {showHeatmaps ? 'Hide Heatmaps' : 'Show Heatmaps'}
                 </button>
-            </div>
+            </div>}
 
             <div style={{ position: 'relative' }}>
                 {(showNetworkActivity || showFiringRate) && (
@@ -335,6 +338,7 @@ export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes
                         CustomTooltip={CustomTooltip}
                         showNetworkActivity={showNetworkActivity}
                         showFiringRate={showFiringRate}
+                        chartHeight={chartHeight}
                     >
                         {/* Overlay Cursor for Network Activity Chart */}
                         {showNetworkActivity && currentTime !== undefined && (
@@ -344,7 +348,7 @@ export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes
                                     top: '45px', // Below label
                                     left: 'var(--space-md)', // Match padding
                                     right: 'var(--space-md)', // Match padding
-                                    height: '200px',
+                                    height: chartHeight,
                                     pointerEvents: 'none',
                                     overflow: 'hidden'
                                 }}
@@ -371,7 +375,7 @@ export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes
             {showRaster && (
                 <div className="viz-canvas" style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)' }}>
                     <div className="data-label" style={{ marginBottom: 'var(--space-md)' }}>Spike Raster Plot (All Data)</div>
-                    <div style={{ height: '600px', width: '100%', position: 'relative' }}>
+                    <div style={{ height: rasterHeight, width: '100%', position: 'relative' }}>
                         <CanvasRasterPlot spikes={spikes} />
 
                         {/* Raster Plot Cursor */}

@@ -18,6 +18,7 @@ interface Organoid3DProps {
     lastFiringCount?: number;
     exportRef?: any;
     spoutEnabled?: boolean;
+    presentation?: boolean; // fill the parent's height and drop the export button
 }
 
 // Shared Geometry for Traces (Optimization)
@@ -507,15 +508,17 @@ export const Organoid3D = (props: Organoid3DProps) => {
     };
 
     return (
-        <div style={{ width: '100%', height: '500px', position: 'relative', background: props.isTransparent ? 'transparent' : '#050505', borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ width: '100%', height: props.presentation ? '100%' : '500px', position: 'relative', background: props.isTransparent ? 'transparent' : '#050505', borderRadius: '8px', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 10, display: 'flex', gap: '8px' }}>
-                <button
-                    className="btn"
-                    onClick={handleExport}
-                    title="Export current curves as SVG for TouchDesigner"
-                >
-                    Export SVG
-                </button>
+                {!props.presentation && (
+                    <button
+                        className="btn"
+                        onClick={handleExport}
+                        title="Export current curves as SVG for TouchDesigner"
+                    >
+                        Export SVG
+                    </button>
+                )}
                 <button
                     className="btn"
                     onClick={handleTopView}

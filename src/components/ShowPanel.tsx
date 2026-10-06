@@ -15,6 +15,7 @@ interface ShowPanelProps {
     connected: boolean;
     onStart: (config: ShowConfig) => void;
     onStop: () => void;
+    presentation?: boolean;   // read-only: no start/stop or config fields, taller raster
 }
 
 const RASTER_HALF_MS = 1000;   // raster shows ±1 s of data around the playhead
@@ -22,6 +23,7 @@ const OVERVIEW_H = 64;
 const TICKS_H = 14;
 const CYCLE_H = 10;
 const RASTER_H = 160;
+const PRESENTATION_RASTER_SHARE = 0.3;   // of the viewport height, at least RASTER_H
 const GAP = 8;
 const ALPHA_BUCKETS = 5;   // raster dots batched into Path2Ds by distance from the playhead
 
@@ -61,11 +63,12 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
-export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop }: ShowPanelProps) {
+export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false }: ShowPanelProps) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
+    const [rasterH, setRasterH] = useState(RASTER_H);
     const [form, setForm] = useState<FormValues | null>(null);
     const [stopArmed, setStopArmed] = useState(false);
     const running = !!showState?.running;
@@ -92,6 +95,14 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
+
+    useEffect(() => {
+        if (!presentation) { setRasterH(RASTER_H); return; }
+        const fit = () => setRasterH(Math.max(RASTER_H, Math.round(window.innerHeight * PRESENTATION_RASTER_SHARE)));
+        fit();
+        window.addEventListener('resize', fit);
+        return () => window.removeEventListener('resize', fit);
+    }, [presentation]);
 
     // Whole-recording firing-rate strip, rendered once per dataset/range/width.
     const startIndex = config?.startIndex ?? 0;
@@ -122,7 +133,7 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
         const canvas = canvasRef.current;
         if (!canvas || width <= 0) return;
         const dpr = window.devicePixelRatio || 1;
-        const height = OVERVIEW_H + TICKS_H + GAP + CYCLE_H + (hasData ? GAP + RASTER_H : 0);
+        const height = OVERVIEW_H + TICKS_H + GAP + CYCLE_H + (hasData ? GAP + rasterH : 0);
         canvas.width = Math.floor(width * dpr);
         canvas.height = Math.floor(height * dpr);
         canvas.style.width = `${width}px`;
@@ -204,11 +215,11 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
             if (!hasData) return;
             const ry = cy + CYCLE_H + GAP;
             ctx.strokeStyle = '#333';
-            ctx.strokeRect(0.5, ry + 0.5, width - 1, RASTER_H - 1);
+            ctx.strokeRect(0.5, ry + 0.5, width - 1, rasterH - 1);
             if (idx !== null) {
                 const t0 = idx - RASTER_HALF_MS;
                 const t1 = idx + RASTER_HALF_MS;
-                const yScale = (RASTER_H - 6) / Math.max(1, maxNeuronId);
+                const yScale = (rasterH - 6) / Math.max(1, maxNeuronId);
                 const paths = Array.from({ length: ALPHA_BUCKETS * 2 }, () => new Path2D());
                 for (let i = lowerBound(spikes, t0); i < spikes.length && spikes[i].timestamp_ms <= t1; i++) {
                     const s = spikes[i];
@@ -229,12 +240,12 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
             ctx.strokeStyle = dim || idx === null ? '#555' : '#fff';
             ctx.beginPath();
             ctx.moveTo(cx, ry);
-            ctx.lineTo(cx, ry + RASTER_H);
+            ctx.lineTo(cx, ry + rasterH);
             ctx.stroke();
         };
         raf = requestAnimationFrame(draw);
         return () => cancelAnimationFrame(raf);
-    }, [width, spikes, hasData, overview, maxNeuronId, connected, latestRef]);
+    }, [width, rasterH, spikes, hasData, overview, maxNeuronId, connected, latestRef]);
 
     const handleButton = () => {
         if (running) {
@@ -267,21 +278,21 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
         <div ref={wrapRef}>
             <div className="flex justify-between items-center" style={{ marginBottom: 'var(--space-sm)' }}>
                 <h2 style={{ margin: 0 }}>SHOW</h2>
-                <button
+                {!presentation && <button
                     className="btn"
                     disabled={!connected || !form}
                     onClick={handleButton}
                     style={running ? { color: '#ff3333', borderColor: '#ff3333' } : undefined}
                 >
                     {running ? (stopArmed ? '■ CONFIRM STOP (FADES TO BLACK)' : '■ STOP SHOW') : '▶ START SHOW'}
-                </button>
+                </button>}
             </div>
             <div
                 ref={hudRef}
-                style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', letterSpacing: '0.06em', marginBottom: 'var(--space-sm)', minHeight: '1.4em' }}
+                style={{ fontFamily: 'var(--font-mono)', fontSize: presentation ? '15px' : '12px', letterSpacing: '0.06em', marginBottom: 'var(--space-sm)', minHeight: '1.4em' }}
             />
             <canvas ref={canvasRef} style={{ display: 'block' }} />
-            <div className="flex" style={{ gap: 'var(--space-md)', flexWrap: 'wrap', marginTop: 'var(--space-md)' }}>
+            {!presentation && <div className="flex" style={{ gap: 'var(--space-md)', flexWrap: 'wrap', marginTop: 'var(--space-md)' }}>
                 {field('Start idx', 'startIndex')}
                 {field('End idx', 'endIndex')}
                 {field('Idx / s', 'fps')}
@@ -302,7 +313,7 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
                         />
                     </label>
                 ))}
-            </div>
+            </div>}
         </div>
     );
 }
