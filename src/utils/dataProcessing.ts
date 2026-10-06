@@ -1,19 +1,8 @@
 import Papa from 'papaparse';
 import { Neuron, SpikeEvent, FiringRateData, ActivityBin } from '../types';
+import { neuronsFromRows } from './neuronRows';
 
 export const SAMPLING_RATE = 1000; // 1kHz (1 row = 1ms)
-
-/**
- * Helper to find a column name from a list of possible names
- */
-const findColumn = (headers: string[], possibleNames: string[]): string | undefined => {
-    const lowerHeaders = headers.map(h => h.toLowerCase().trim());
-    for (const name of possibleNames) {
-        const index = lowerHeaders.indexOf(name.toLowerCase());
-        if (index !== -1) return headers[index];
-    }
-    return undefined;
-};
 
 /**
  * Parse neuron location CSV file
@@ -26,49 +15,7 @@ export const parseNeuronCSV = (file: File): Promise<Neuron[]> => {
             skipEmptyLines: true,
             complete: (results) => {
                 try {
-                    const headers = results.meta.fields || [];
-                    let idCol = findColumn(headers, ['neuron_id', 'id', 'neuron', 'label', 'unit_id']);
-                    let xCol = findColumn(headers, ['x', 'x_pos', 'x_coord', 'x_location', 'pos_x', 'xy_norm_0']);
-                    let yCol = findColumn(headers, ['y', 'y_pos', 'y_coord', 'y_location', 'pos_y', 'xy_norm_1']);
-                    let backboneCol = findColumn(headers, ['is_backbone', 'backbone', 'type', 'is_anchor']);
-
-                    let neurons: Neuron[] = [];
-
-                    if (xCol && yCol) {
-                        neurons = results.data
-                            .map((row: any, index: number) => {
-                                let id = index + 1;
-                                let isBackbone = false;
-
-                                if (idCol && row[idCol] != null) {
-                                    const val = Number(row[idCol]);
-                                    if (val === 0 || val === 1) {
-                                        isBackbone = val === 1;
-                                    } else {
-                                        id = val;
-                                        if (backboneCol) {
-                                            isBackbone = (row[backboneCol] === true || row[backboneCol] === 'true' || row[backboneCol] === 1);
-                                        }
-                                    }
-                                } else if (backboneCol) {
-                                    isBackbone = (row[backboneCol] === true || row[backboneCol] === 'true' || row[backboneCol] === 1);
-                                }
-
-                                if (row[xCol!] == null || row[yCol!] == null) return null;
-
-                                return {
-                                    neuron_id: id,
-                                    x: Number(row[xCol!]),
-                                    y: Number(row[yCol!]),
-                                    is_backbone: isBackbone,
-                                    xy_norm_0: row['xy_norm_0'] !== undefined ? Number(row['xy_norm_0']) : Number(row[xCol!]),
-                                    xy_norm_1: row['xy_norm_1'] !== undefined ? Number(row['xy_norm_1']) : Number(row[yCol!])
-                                };
-                            })
-                            .filter(n => n !== null) as Neuron[];
-                    }
-
-                    resolve(neurons);
+                    resolve(neuronsFromRows(results.meta.fields || [], results.data));
                 } catch (error) {
                     reject(error);
                 }
