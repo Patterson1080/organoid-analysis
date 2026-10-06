@@ -78,6 +78,8 @@ interface CircularEventGraphProps {
     onTimeScrub?: (newTime: number) => void;
     onScrubStateChange?: (isScrubbing: boolean) => void;
     onCenterTap?: () => void;
+    title?: string;
+    presentation?: boolean; // fit the disc to the viewport, no detach/export buttons
 }
 
 // --- Color helper: electric blue → bright red intensity gradient ---
@@ -188,8 +190,10 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
     mode = 'topology',
     showZoomWindow = true,
     title,
+    presentation = false,
     onTimeScrub,
     onScrubStateChange,
+    onCenterTap,
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isExporting, setIsExporting] = useState(false);
@@ -1253,15 +1257,18 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
     }
 
     const graphContent = (
-        <div className="circular-graph-container" style={{ position: 'relative', marginTop: 'var(--space-xl)' }}>
+        <div className="circular-graph-container" style={{ position: 'relative', marginTop: presentation ? 0 : 'var(--space-xl)' }}>
             <div className="flex justify-between items-center" style={{ width: '100%', marginBottom: 'var(--space-md)' }}>
                 <h2 style={{ letterSpacing: '0.1em', margin: 0 }}>CIRCULAR EVENT TOPOLOGY {mode === 'regions' && '(REGIONS)'}</h2>
-                <button className="btn btn-secondary" onClick={() => setIsDetached(true)}>
-                    ⏏ Detach Window
-                </button>
+                {!presentation && (
+                    <button className="btn btn-secondary" onClick={() => setIsDetached(true)}>
+                        ⏏ Detach Window
+                    </button>
+                )}
             </div>
             <div style={{
-                width: '100%',
+                width: presentation ? 'min(100%, var(--pres-fit))' : '100%',
+                margin: presentation ? '0 auto' : undefined,
                 height: 'auto',
                 aspectRatio: '1/1',
                 background: '#000',
@@ -1277,20 +1284,24 @@ export const CircularEventGraph: React.FC<CircularEventGraphProps> = ({
             </div>
 
             <div className="flex gap-md" style={{ marginTop: 'var(--space-md)', flexWrap: 'wrap', width: '100%', justifyContent: 'flex-start' }}>
-                <button
-                    className="btn"
-                    onClick={handleExportPNG}
-                    disabled={isExporting}
-                >
-                    {isExporting ? 'Processing...' : `Export Frame (${exportResolution}x${exportResolution})`}
-                </button>
-                <button
-                    className="btn"
-                    onClick={handleExportSequence}
-                    disabled={isExporting}
-                >
-                    {isExporting ? `Exporting Sequence ${exportProgress}%` : 'Export Sequence (ZIP)'}
-                </button>
+                {!presentation && (
+                    <>
+                        <button
+                            className="btn"
+                            onClick={handleExportPNG}
+                            disabled={isExporting}
+                        >
+                            {isExporting ? 'Processing...' : `Export Frame (${exportResolution}x${exportResolution})`}
+                        </button>
+                        <button
+                            className="btn"
+                            onClick={handleExportSequence}
+                            disabled={isExporting}
+                        >
+                            {isExporting ? `Exporting Sequence ${exportProgress}%` : 'Export Sequence (ZIP)'}
+                        </button>
+                    </>
+                )}
                 <div className="status-text" style={{ alignSelf: 'center' }}>
                     Optimized for Circular LED Projection &middot; Field-Golubitsky Symmetry Mode
                 </div>

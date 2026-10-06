@@ -84,10 +84,11 @@ interface HypergraphsPanelProps {
     neurons: Neuron[];
     currentTime: number;
     isPlaying: boolean;
+    presentation?: boolean; // hide the settings sidebar and buttons, fit the view to the screen
     // We pass the global window end time from App.tsx (usually 180s) to know data bounds if needed
 }
 
-export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neurons, currentTime, isPlaying }) => {
+export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neurons, currentTime, isPlaying, presentation = false }) => {
     // --- State: UI Settings ---
     const [binSizeMs, setBinSizeMs] = useState<number>(20);
     const [windowLengthSec, setWindowLengthSec] = useState<number>(3); // 1, 3, 10
@@ -148,7 +149,7 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
             const rect = container.getBoundingClientRect();
             setDimensions({
                 width: rect.width || 800,
-                height: rect.width || 600 // Keep it roughly square or dynamic
+                height: rect.height || 600
             });
         };
 
@@ -156,7 +157,7 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
         const ro = new ResizeObserver(updateSize);
         ro.observe(container);
         return () => ro.disconnect();
-    }, []);
+    }, [viewMode]); // the 2D container is remounted after a trip through 3D
 
     // --- Computation Logic ---
     useEffect(() => {
@@ -281,18 +282,19 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Use standard layout limits
+        // Use standard layout limits (drawing units); presentation scales them to fit the box
         const width = 800;
         const height = 800;
+        const size = presentation ? Math.max(200, Math.floor(Math.min(dimensions.width, dimensions.height))) : width;
 
         // Handle high DPI displays
         const dpr = window.devicePixelRatio || 1;
-        canvas.width = width * dpr;
-        canvas.height = height * dpr;
+        canvas.width = size * dpr;
+        canvas.height = size * dpr;
 
-        ctx.scale(dpr, dpr);
-        canvas.style.width = `${width}px`;
-        canvas.style.height = `${height}px`;
+        ctx.scale((dpr * size) / width, (dpr * size) / height);
+        canvas.style.width = `${size}px`;
+        canvas.style.height = `${size}px`;
 
         // Clear canvas
         ctx.fillStyle = '#050505'; // very dark background
@@ -454,7 +456,7 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
 
     useEffect(() => {
         drawFrame();
-    }, [dimensions, latestFrame, neurons, showBurstSnapshot, frozenSnapshot, visStyle, overlayFrames, currentTracks, showLinks, fadeOlder]); // redraw if data or size changes
+    }, [dimensions, presentation, latestFrame, neurons, showBurstSnapshot, frozenSnapshot, visStyle, overlayFrames, currentTracks, showLinks, fadeOlder]); // redraw if data or size changes
 
 
     // --- SVG Export generation ---
@@ -602,7 +604,7 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
             <div className="flex justify-between items-center" style={{ marginBottom: 'var(--space-md)' }}>
                 <h2>Hypergraphs View</h2>
 
-                <div className="flex gap-sm">
+                {!presentation && <div className="flex gap-sm">
                     <button className="btn" onClick={handleExportPNG}>Export PNG</button>
                     <button className="btn" onClick={handleExportSVG}>Export SVG</button>
                     <button
@@ -612,12 +614,12 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
                     >
                         {freezeCompute ? '▶ Resume Compute' : '■ Freeze Compute'}
                     </button>
-                </div>
+                </div>}
             </div>
 
             <div className="grid" style={{ gridTemplateColumns: '1fr 3fr', gap: 'var(--space-md)' }}>
                 {/* Controls Sidebar */}
-                <div className="flex flex-col gap-md" style={{ background: 'rgba(0,0,0,0.2)', padding: 'var(--space-md)', borderRight: '1px solid var(--color-border)' }}>
+                {!presentation && <div className="flex flex-col gap-md" style={{ background: 'rgba(0,0,0,0.2)', padding: 'var(--space-md)', borderRight: '1px solid var(--color-border)' }}>
 
                     <div className="flex flex-col gap-sm">
                         <label className="data-label">Bin Size: {binSizeMs} ms</label>
@@ -827,13 +829,15 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
                             </div>
                         </div>
                     )}
-                </div>
+                </div>}
 
                 {/* Viewport Area */}
                 {viewMode === '2D' ? (
                     <div ref={containerRef} className="viz-canvas" style={{
                         position: 'relative',
-                        minHeight: '600px',
+                        ...(presentation
+                            ? { width: '100%', aspectRatio: '1', maxHeight: 'var(--pres-fit)', minHeight: 0 }
+                            : { minHeight: '600px' }),
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -843,7 +847,14 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
                         <canvas ref={canvasRef} style={{ display: 'block', margin: '0 auto' }} />
                     </div>
                 ) : (
-                    <div className="viz-canvas" style={{ minHeight: '600px', border: showBurstSnapshot && frozenSnapshot ? '2px solid var(--color-accent)' : undefined }}>
+                    <div className="viz-canvas" style={{
+                        // Hypergraphs3D's own sizing classes have no CSS; in presentation a grid
+                        // stretches it to the box so its canvas fills the screen height.
+                        ...(presentation
+                            ? { display: 'grid', height: 'var(--pres-fit)', overflow: 'hidden' }
+                            : { minHeight: '600px' }),
+                        border: showBurstSnapshot && frozenSnapshot ? '2px solid var(--color-accent)' : undefined
+                    }}>
                         <Hypergraphs3D
                             frames={showBurstSnapshot && frozenSnapshot ? frozenSnapshot.frames : overlayFrames}
                             tracks={(showBurstSnapshot && frozenSnapshot) ? frozenSnapshot.tracks : (showLinks ? currentTracks : [])}
