@@ -38,8 +38,8 @@ let lastShowLog = '';
 
 // Initialize WebSocket Server
 function startWsServer() {
-    wsServer = new WebSocketServer({ port: WS_PORT });
-    console.log(`WebSocket bridge running on ws://localhost:${WS_PORT}`);
+    wsServer = new WebSocketServer({ host: '127.0.0.1', port: WS_PORT });
+    console.log(`WebSocket bridge running on ws://127.0.0.1:${WS_PORT}`);
 
     wsServer.on('connection', (ws) => {
         console.log('Frontend connected');

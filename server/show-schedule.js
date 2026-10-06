@@ -29,23 +29,31 @@ const toNumber = (value, fallback) => {
 
 const toAddress = (value, fallback) => (typeof value === 'string' ? value.trim() : fallback);
 
+// Caps keep a bad form value from spinning the clock or allocating millions of cues.
+const MAX_FPS = 1000;
+const MAX_INDEX = 100_000_000;
+const MAX_SECONDS = 86_400;
+const MAX_CUE_COUNT = 1000;
+const MAX_SPREAD_CUES = 32;
+
 // Fill defaults and repair what the clock can't run (form inputs arrive as strings).
 // passStartCue may be '' (send none); the other addresses fall back to their defaults.
 export function normalizeConfig(partial = {}) {
     const d = DEFAULT_SHOW_CONFIG;
-    let startIndex = Math.max(0, Math.floor(toNumber(partial.startIndex, d.startIndex)));
-    let endIndex = Math.max(0, Math.floor(toNumber(partial.endIndex, d.endIndex)));
+    let startIndex = Math.min(MAX_INDEX, Math.max(0, Math.floor(toNumber(partial.startIndex, d.startIndex))));
+    let endIndex = Math.min(MAX_INDEX, Math.max(0, Math.floor(toNumber(partial.endIndex, d.endIndex))));
     if (endIndex < startIndex) [startIndex, endIndex] = [endIndex, startIndex];
     const fps = toNumber(partial.fps, d.fps);
     const spreadCues = (Array.isArray(partial.spreadCues) ? partial.spreadCues : d.spreadCues)
         .filter(c => c && typeof c.address === 'string' && c.address.trim() !== '')
-        .map(c => ({ address: c.address.trim(), count: Math.max(0, Math.floor(toNumber(c.count, 0))) }));
+        .slice(0, MAX_SPREAD_CUES)
+        .map(c => ({ address: c.address.trim(), count: Math.min(MAX_CUE_COUNT, Math.max(0, Math.floor(toNumber(c.count, 0)))) }));
     return {
         startIndex,
         endIndex,
-        fps: fps > 0 ? fps : d.fps,
-        offSeconds: Math.max(0, toNumber(partial.offSeconds, d.offSeconds)),
-        fadeSeconds: Math.max(0, toNumber(partial.fadeSeconds, d.fadeSeconds)),
+        fps: fps > 0 ? Math.min(MAX_FPS, fps) : d.fps,
+        offSeconds: Math.min(MAX_SECONDS, Math.max(0, toNumber(partial.offSeconds, d.offSeconds))),
+        fadeSeconds: Math.min(MAX_SECONDS, Math.max(0, toNumber(partial.fadeSeconds, d.fadeSeconds))),
         indexAddress: toAddress(partial.indexAddress, d.indexAddress) || d.indexAddress,
         passStartCue: toAddress(partial.passStartCue, d.passStartCue),
         onAddress: toAddress(partial.onAddress, d.onAddress) || d.onAddress,
@@ -95,12 +103,16 @@ export function offMessage(config) {
     return { address: config.offAddress, args: [fadeArg(config)] };
 }
 
+// A late tick sends the frames it skipped, in order, each followed by its cues, so
+// receivers still see every index. A longer gap (machine sleep) jumps instead of
+// flooding, and the cues it jumped over fire once.
+export const MAX_FILL_FRAMES = 30;
+
 // One clock tick: the OSC messages that carry the show from `prev` (last tick's
 // { pass, phase, index }, null on the first tick after START) to now.
-//   leaving a pass's ON phase → its remaining cues, then the off cue
-//   entering a new pass       → pass-start cue, on cue, then /index from startIndex
-//   within ON                 → /index when it changed, plus every cue in (prev, index]
-// Cues fire on crossing, not equality, so a late tick that skips frames never drops one.
+//   leaving a pass's ON phase -> its remaining frames and cues, then the off cue
+//   entering a new pass       -> pass-start cue, on cue, then /index from startIndex
+//   within ON                 -> /index for each new frame, each followed by its cues
 export function step(prev, config, elapsedMs, cues = cueFrames(config)) {
     const now = stateAt(config, elapsedMs);
     const messages = [];
@@ -110,10 +122,19 @@ export function step(prev, config, elapsedMs, cues = cueFrames(config)) {
             if (cue.frame > after && cue.frame <= upTo) send(cue.address, 1);
         }
     };
+    // /index for every frame in (after, upTo], each followed by the cues on that frame.
+    const sendFrames = (after, upTo) => {
+        const first = Math.max(after + 1, upTo - MAX_FILL_FRAMES + 1);
+        fireCues(after, first - 1);
+        for (let frame = first; frame <= upTo; frame++) {
+            send(config.indexAddress, frame);
+            fireCues(frame - 1, frame);
+        }
+    };
 
     const stillInSameOn = prev && prev.pass === now.pass && now.phase === 'on';
     if (prev && prev.phase === 'on' && !stillInSameOn) {
-        fireCues(prev.index, config.endIndex);
+        sendFrames(prev.index, config.endIndex);
         if (config.offSeconds > 0) send(config.offAddress, fadeArg(config));
     }
 
@@ -123,10 +144,7 @@ export function step(prev, config, elapsedMs, cues = cueFrames(config)) {
             if (config.passStartCue) send(config.passStartCue, 1);
             send(config.onAddress, fadeArg(config));
         }
-        if (newPass || now.index !== prev.index) {
-            send(config.indexAddress, now.index);
-            fireCues(newPass ? config.startIndex - 1 : prev.index, now.index);
-        }
+        sendFrames(newPass ? config.startIndex - 1 : prev.index, now.index);
     }
 
     return { next: { pass: now.pass, phase: now.phase, index: now.index }, state: now, messages };

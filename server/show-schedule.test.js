@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    DEFAULT_SHOW_CONFIG, normalizeConfig, timing, cueFrames, stateAt, step, offMessage,
+    DEFAULT_SHOW_CONFIG, normalizeConfig, timing, cueFrames, stateAt, step, offMessage, MAX_FILL_FRAMES,
 } from './show-schedule.js';
 
 const config = normalizeConfig();
@@ -63,15 +63,27 @@ test('step: same frame sends nothing; next frame sends only /index', () => {
     assert.deepEqual(step(first.next, config, msAt(1)).messages, [{ address: '/index', args: [1] }]);
 });
 
-test('step: a late tick that skips past a cue frame still fires the cue', () => {
-    const prev = { pass: 1, phase: 'on', index: 29990 };
-    assert.deepEqual(addrs(step(prev, config, msAt(30010))), ['/index', '/sim_resetTermites']);
+test('step: a late tick sends every skipped frame, each cue right after its frame', () => {
+    const r = step({ pass: 1, phase: 'on', index: 29990 }, config, msAt(30010));
+    assert.deepEqual(r.messages.filter(m => m.address === '/index').map(m => m.args[0]),
+        Array.from({ length: 20 }, (_, i) => 29991 + i));
+    const cue = r.messages.findIndex(m => m.address === '/sim_resetTermites');
+    assert.deepEqual(r.messages[cue - 1], { address: '/index', args: [30000] });
+});
+
+test('step: a gap longer than MAX_FILL_FRAMES jumps, firing jumped cues once', () => {
+    const r = step({ pass: 1, phase: 'on', index: 0 }, config, msAt(40000));
+    const a = addrs(r);
+    assert.deepEqual(a.slice(0, 3), ['/sim_resetPhysarum', '/sim_resetTermites', '/sim_resetPhysarum']); // 16364, 30000, 32727
+    assert.deepEqual(r.messages.slice(3).map(m => m.args[0]),
+        Array.from({ length: MAX_FILL_FRAMES }, (_, i) => 40000 - MAX_FILL_FRAMES + 1 + i));
 });
 
 test('step: end of pass fades out once, then OFF is silent', () => {
     const prev = { pass: 1, phase: 'on', index: 179990 };
     const r = step(prev, config, 3_000_500);
-    assert.deepEqual(r.messages, [{ address: '/sim_off', args: [{ type: 'f', value: 5 }] }]);
+    assert.deepEqual(r.messages.slice(0, 9).map(m => m.args[0]), [179991, 179992, 179993, 179994, 179995, 179996, 179997, 179998, 179999]);
+    assert.deepEqual(r.messages.slice(9), [{ address: '/sim_off', args: [{ type: 'f', value: 5 }] }]);
     assert.deepEqual(step(r.next, config, 3_060_000).messages, []);
 });
 
@@ -83,8 +95,10 @@ test('step: OFF → pass 2 respawns while black, then fades in', () => {
 test('step: a stall across OFF closes the old pass before starting the new one', () => {
     const prev = { pass: 1, phase: 'on', index: 100 };
     const a = addrs(step(prev, config, 3_120_000 + 1000));
-    assert.equal(a.slice(0, 15).filter(x => x === '/sim_resetTermites' || x === '/sim_resetPhysarum').length, 15);
-    assert.deepEqual(a.slice(15), ['/sim_off', '/sim_resetSimsOnly', '/sim_on', '/index']);
+    assert.ok(a.slice(0, 15).every(x => x === '/sim_resetTermites' || x === '/sim_resetPhysarum'));
+    assert.deepEqual(a.slice(15, 45), Array(30).fill('/index'));
+    assert.deepEqual(a.slice(45, 48), ['/sim_off', '/sim_resetSimsOnly', '/sim_on']);
+    assert.deepEqual(a.slice(48), Array(30).fill('/index'));
 });
 
 test('step: offSeconds 0 loops passes back to back with no /sim_off', () => {
@@ -99,4 +113,12 @@ test('step: empty passStartCue sends none', () => {
 
 test('offMessage: STOP fades out with the configured fade', () => {
     assert.deepEqual(offMessage(normalizeConfig({ fadeSeconds: 2 })), { address: '/sim_off', args: [{ type: 'f', value: 2 }] });
+});
+
+test('normalizeConfig caps values that would spin the clock or flood cues', () => {
+    const c = normalizeConfig({ fps: 1e9, endIndex: 1e12, offSeconds: 1e9, spreadCues: [{ address: '/a', count: 1e9 }] });
+    assert.equal(c.fps, 1000);
+    assert.equal(c.endIndex, 100_000_000);
+    assert.equal(c.offSeconds, 86_400);
+    assert.deepEqual(c.spreadCues, [{ address: '/a', count: 1000 }]);
 });
