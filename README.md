@@ -6,7 +6,7 @@ A real-time neural activity visualization system for brain organoid multi-electr
 
 ### Prerequisites
 
-- Node.js (v16 or higher)
+- Node.js 22.18 or newer (the bridge and the tests load TypeScript modules with Node's built-in type stripping)
 - npm
 
 ### Installation

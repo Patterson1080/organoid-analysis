@@ -20,9 +20,9 @@ export interface LedFrame {
 
 export const LED_TRAIL_LENGTH = 5;
 // More distinct neurons than this firing in one frame lights all of them at once.
-export const LED_BURST_NEURONS = 5;
+const LED_BURST_NEURONS = 5;
 // Show playhead → LED/sound output: the most data (ms) emitted for one SHOW_STATE tick.
-export const SHOW_OUTPUT_MAX_GAP = 30;
+const SHOW_OUTPUT_MAX_GAP = 30;
 
 export function neuronBounds(neurons: LedNeuron[]): Bounds | null {
     if (neurons.length === 0) return null;

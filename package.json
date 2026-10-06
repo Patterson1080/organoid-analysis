@@ -7,6 +7,9 @@
   "main": "electron/main.cjs",
   "homepage": "./",
   "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "dev": "vite",
     "server": "concurrently \"node server/osc-bridge.js\" \"node server/serial-bridge.js\"",

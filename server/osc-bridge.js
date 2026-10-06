@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { pipeline } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { Client, Server } from 'node-osc';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -145,7 +146,11 @@ function serveData(req, res) {
         return;
     }
     res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Length': statSync(file).size });
-    createReadStream(file).pipe(res);
+    // pipeline, not pipe: a read error (e.g. an unreadable symlink target) ends this
+    // response instead of throwing and taking the show down with the bridge.
+    pipeline(createReadStream(file), res, err => {
+        if (err) console.warn(`Serving ${req.url} stopped: ${err.message}`);
+    });
 }
 
 async function loadShowData() {
