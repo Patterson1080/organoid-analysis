@@ -1,5 +1,5 @@
 // App.tsx - Main application component
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import './index.css';
@@ -11,8 +11,10 @@ import PCA3D from './components/PCA3D';
 import { HypergraphsPanel } from './components/HypergraphsPanel';
 import { CircularEventGraph } from './components/CircularEventGraph';
 import { NeuralWebGraph } from './components/NeuralWebGraph';
+import { ShowPanel, ShowStateSnapshot } from './components/ShowPanel';
 
-import { Neuron, SpikeEvent } from './types';
+import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
+import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
 
 // Binary search helpers removed as they were unused
@@ -57,6 +59,7 @@ function App() {
     const [showCircularGraph, setShowCircularGraph] = useState(false);
     const [showRegionsGraph, setShowRegionsGraph] = useState(false);
     const [showNeuralWeb, setShowNeuralWeb] = useState(false);
+    const [showShowPanel, setShowShowPanel] = useState(true);
 
 
     const allSpikesRef = useRef<SpikeEvent[]>([]);
@@ -73,20 +76,20 @@ function App() {
     const [playbackTime, setPlaybackTime] = useState(0);
     const animationRef = useRef<number>();
 
-    // OSC State
-    const [oscInPort, setOscInPort] = useState('3333');
-    const [oscOutIp, setOscOutIp] = useState('127.0.0.1');
-    const [oscOutPort, setOscOutPort] = useState('3334');
+    // OSC State — restored from the last session so a reload never pushes defaults to the bridge.
+    const [savedOsc] = useState(loadOscSettings);
+    const [oscInPort, setOscInPort] = useState(savedOsc.oscInPort);
+    const [oscOutIp, setOscOutIp] = useState(savedOsc.oscOutIp);
+    const [oscOutPort, setOscOutPort] = useState(savedOsc.oscOutPort);
 
     // OSC Output message config (addresses + enable toggles).
-    // Defaults reproduce the current output exactly: /time, /x1,/y1..., /row echo.
-    const [oscTimeEnabled, setOscTimeEnabled] = useState(true);
-    const [oscTimeAddress, setOscTimeAddress] = useState('/index');
-    const [oscNeuronsEnabled, setOscNeuronsEnabled] = useState(true);
-    const [oscXPrefix, setOscXPrefix] = useState('/x');
-    const [oscYPrefix, setOscYPrefix] = useState('/y');
-    const [oscRowEnabled, setOscRowEnabled] = useState(true);
-    const [oscRowAddress, setOscRowAddress] = useState('/row');
+    const [oscTimeEnabled, setOscTimeEnabled] = useState(savedOsc.oscTimeEnabled);
+    const [oscTimeAddress, setOscTimeAddress] = useState(savedOsc.oscTimeAddress);
+    const [oscNeuronsEnabled, setOscNeuronsEnabled] = useState(savedOsc.oscNeuronsEnabled);
+    const [oscXPrefix, setOscXPrefix] = useState(savedOsc.oscXPrefix);
+    const [oscYPrefix, setOscYPrefix] = useState(savedOsc.oscYPrefix);
+    const [oscRowEnabled, setOscRowEnabled] = useState(savedOsc.oscRowEnabled);
+    const [oscRowAddress, setOscRowAddress] = useState(savedOsc.oscRowAddress);
     const [wsConnected, setWsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [lastOscMessage, setLastOscMessage] = useState<{ address: string, args: any[] } | null>(null);
@@ -118,6 +121,15 @@ function App() {
     const lastUiUpdateRef = useRef(0);
     const isManuallyPausedRef = useRef(false);
 
+    // Show mode: the bridge owns the clock (server/show-runner.js) and streams SHOW_STATE.
+    // showState changes only on start/stop/phase/pass (cheap re-renders); showLatestRef
+    // holds every message for the panel's draw loop and the playhead.
+    const [showState, setShowState] = useState<ShowState | null>(null);
+    const showLatestRef = useRef<ShowStateSnapshot | null>(null);
+    const showRunningRef = useRef(false);
+    const showRunning = !!showState?.running;
+    const showOn = showRunning && showState?.phase === 'on';
+
     // Sync ref with state when state changes (e.g. user scrubbing)
     useEffect(() => {
         if (!isPlaying) {
@@ -127,6 +139,7 @@ function App() {
 
     // Handle Incoming OSC Row Index
     const handleOscRowInput = useCallback((rowIndex: number) => {
+        if (showRunningRef.current) return; // the show owns the playhead
         if (allSpikesRef.current.length > 0) {
             const idx = Math.max(0, Math.min(rowIndex, allSpikesRef.current.length - 1));
             const spike = allSpikesRef.current[idx];
@@ -145,6 +158,40 @@ function App() {
                 }
             }
         }
+    }, []);
+
+    const handleShowState = useCallback((s: ShowState) => {
+        const prev = showLatestRef.current?.state;
+        showLatestRef.current = { state: s, receivedAt: performance.now() };
+        showRunningRef.current = s.running;
+        if (!prev || prev.running !== s.running || prev.phase !== s.phase || prev.pass !== s.pass) {
+            setShowState(s);
+        }
+        // Existing views follow the show index (= data ms) as their playhead.
+        if (s.running && s.phase === 'on' && s.index !== null) {
+            playbackTimeRef.current = s.index;
+            lastPlaybackTimeRef.current = s.index;
+            const now = performance.now();
+            if (now - lastUiUpdateRef.current > 100) {
+                setPlaybackTime(s.index);
+                lastUiUpdateRef.current = now;
+            }
+        }
+    }, []);
+
+    // Mid-show reconnect: the bridge kept its own OSC settings; mirror them in the panel.
+    const handleOscConfig = useCallback((c: { oscInPort: number; oscOutPort: number; oscOutIp: string; osc?: Record<string, unknown> }) => {
+        setOscInPort(String(c.oscInPort));
+        setOscOutPort(String(c.oscOutPort));
+        setOscOutIp(String(c.oscOutIp));
+        const o = c.osc ?? {};
+        if (typeof o.timeEnabled === 'boolean') setOscTimeEnabled(o.timeEnabled);
+        if (typeof o.timeAddress === 'string') setOscTimeAddress(o.timeAddress);
+        if (typeof o.neuronsEnabled === 'boolean') setOscNeuronsEnabled(o.neuronsEnabled);
+        if (typeof o.xPrefix === 'string') setOscXPrefix(o.xPrefix);
+        if (typeof o.yPrefix === 'string') setOscYPrefix(o.yPrefix);
+        if (typeof o.rowEnabled === 'boolean') setOscRowEnabled(o.rowEnabled);
+        if (typeof o.rowAddress === 'string') setOscRowAddress(o.rowAddress);
     }, []);
 
     // Build the full CONFIG payload (ports, IPs, and output message config).
@@ -192,6 +239,7 @@ function App() {
                 // Send initial config
                 ws.send(JSON.stringify({
                     type: 'CONFIG',
+                    initial: true,
                     payload: getOscConfigPayload()
                 }));
             };
@@ -206,6 +254,11 @@ function App() {
                             const rowIndex = Number(data.payload.args[0]);
                             handleOscRowInput(rowIndex);
                         }
+                    }
+                    else if (data.type === 'SHOW_STATE') {
+                        handleShowState(data.payload);
+                    } else if (data.type === 'OSC_CONFIG') {
+                        handleOscConfig(data.payload);
                     }
                 } catch (e) {
                     console.error('WS: Parse error', e);
@@ -240,7 +293,7 @@ function App() {
                 connectWs();
             }, 2000);
         }
-    }, [getOscConfigPayload, handleOscRowInput]);
+    }, [getOscConfigPayload, handleOscRowInput, handleShowState, handleOscConfig]);
 
     const toggleConnection = useCallback(() => {
         if (wsConnected && wsRef.current) {
@@ -335,6 +388,27 @@ function App() {
             }));
         }
     }, [getOscConfigPayload]);
+
+    useEffect(() => {
+        saveOscSettings({ oscInPort, oscOutIp, oscOutPort, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress });
+    }, [oscInPort, oscOutIp, oscOutPort, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress]);
+
+    // One /index sender: local playback stays off while the show runs (covers PLAY,
+    // spacebar, center tap, scrub release and /row input in one place).
+    useEffect(() => {
+        if (showRunning && isPlaying) setIsPlaying(false);
+    }, [showRunning, isPlaying]);
+
+    const sendShow = useCallback((message: { type: 'SHOW_START'; payload: { config: ShowConfig } } | { type: 'SHOW_STOP' }) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify(message));
+        }
+    }, []);
+
+    const maxNeuronId = useMemo(
+        () => neurons.reduce((m, n) => Math.max(m, n.neuron_id), 0) || 131,
+        [neurons],
+    );
 
     const handleNeuronsLoaded = (loadedNeurons: Neuron[]) => {
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -531,6 +605,7 @@ function App() {
         const handleKeyDown = (e: KeyboardEvent) => {
             // Only handle if not typing in an input
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+            if (showRunningRef.current) return; // transport is locked during the show
 
             const STEP_MS = 10; // 10ms per step
 
@@ -889,10 +964,10 @@ function App() {
                                                     border: bd,
                                                     width: '100%',
                                                 }}>
-                                                    {C(1,1, <button style={cell} onClick={() => { setIsPlaying(false); setPlaybackTime(Math.max(startTime, playbackTime - 10)); }}>&lt;</button>)}
-                                                    {C(2,1, <button style={cell} onClick={() => setIsPlaying(!isPlaying)}>{isPlaying ? '|| PAUSE' : '> PLAY'}</button>)}
-                                                    {C(3,1, <button style={cell} onClick={() => { setIsPlaying(false); setPlaybackTime(startTime); }}>[] STOP</button>)}
-                                                    {C(4,1, <button style={cell} onClick={() => { setIsPlaying(false); setPlaybackTime(Math.min(endTime, playbackTime + 10)); }}>&gt;</button>)}
+                                                    {C(1,1, <button style={showRunning ? { ...cell, opacity: 0.3, cursor: 'not-allowed' } : cell} disabled={showRunning} onClick={() => { setIsPlaying(false); setPlaybackTime(Math.max(startTime, playbackTime - 10)); }}>&lt;</button>)}
+                                                    {C(2,1, <button style={showRunning ? { ...cell, opacity: 0.3, cursor: 'not-allowed' } : cell} disabled={showRunning} onClick={() => setIsPlaying(!isPlaying)}>{isPlaying ? '|| PAUSE' : '> PLAY'}</button>)}
+                                                    {C(3,1, <button style={showRunning ? { ...cell, opacity: 0.3, cursor: 'not-allowed' } : cell} disabled={showRunning} onClick={() => { setIsPlaying(false); setPlaybackTime(startTime); }}>[] STOP</button>)}
+                                                    {C(4,1, <button style={showRunning ? { ...cell, opacity: 0.3, cursor: 'not-allowed' } : cell} disabled={showRunning} onClick={() => { setIsPlaying(false); setPlaybackTime(Math.min(endTime, playbackTime + 10)); }}>&gt;</button>)}
                                                     {C(1,2, <button style={isLooping   ? cellActive : cell} onClick={() => setIsLooping(!isLooping)}>{isLooping ? '[*] LOOP' : '[ ] LOOP'}</button>)}
                                                     {C(2,2, <button style={soundEnabled ? cellActive : cell} onClick={() => setSoundEnabled(!soundEnabled)}>{soundEnabled ? '[+] SOUND' : '[-] SOUND'}</button>)}
                                                     {C(3,2, <button style={isReverse   ? cellActive : cell} onClick={() => setIsReverse(!isReverse)}>&lt; REVERSE</button>)}
@@ -952,6 +1027,12 @@ function App() {
                         <div className="grid-cell">
                             <h2>View Controls</h2>
                             <div className="flex flex-col gap-md">
+                                <button
+                                    className={`btn ${showShowPanel ? 'active' : ''}`}
+                                    onClick={() => setShowShowPanel(!showShowPanel)}
+                                >
+                                    {showShowPanel ? '■ Hide' : '▶'} SHOW PANEL
+                                </button>
                                 {neurons.length > 0 && (
                                     <button className="btn" onClick={() => setShowOrganoid(!showOrganoid)}>
                                         {showOrganoid ? '■ Hide' : '▶'} Organoid Map (3D)
@@ -1251,6 +1332,20 @@ function App() {
                 </div>
 
                 <div className="viz-section">
+                    {showShowPanel && (
+                        <div className="grid-cell" style={{ gridColumn: '1 / -1' }}>
+                            <ShowPanel
+                                spikes={allSpikesRef.current}
+                                maxNeuronId={maxNeuronId}
+                                showState={showState}
+                                latestRef={showLatestRef}
+                                connected={wsConnected}
+                                onStart={config => sendShow({ type: 'SHOW_START', payload: { config } })}
+                                onStop={() => sendShow({ type: 'SHOW_STOP' })}
+                            />
+                        </div>
+                    )}
+
                     {showOrganoid && neurons.length > 0 && (
                         <div className="grid-cell">
                             <h2>Organoid Map (3D)</h2>
@@ -1279,7 +1374,7 @@ function App() {
                             <SpikeActivityGraphs
                                 spikes={visibleSpikes}
                                 neurons={neurons}
-                                currentTime={isPlaying ? playbackTime : undefined}
+                                currentTime={isPlaying || showOn ? playbackTime : undefined}
                             />
                         </div>
                     )}
@@ -1302,7 +1397,7 @@ function App() {
                                 spikes={allSpikesRef.current}
                                 neurons={neurons}
                                 currentTime={playbackTime}
-                                isPlaying={isPlaying}
+                                isPlaying={isPlaying || showOn}
                                 threshold={realTimeThreshold}
                                 width={1200}
                                 height={400}
@@ -1317,7 +1412,7 @@ function App() {
                                 spikes={allSpikesRef.current}
                                 neurons={neurons}
                                 currentTime={playbackTime}
-                                isPlaying={isPlaying}
+                                isPlaying={isPlaying || showOn}
                             />
                         </div>
                     )}
@@ -1334,10 +1429,12 @@ function App() {
                                 targetDuration={targetDuration}
                                 mode="topology"
                                 onCenterTap={() => {
+                                    if (showRunningRef.current) return;
                                     isManuallyPausedRef.current = !isManuallyPausedRef.current;
                                     setIsPlaying(!isManuallyPausedRef.current);
                                 }}
                                 onTimeScrub={(t) => {
+                                    if (showRunningRef.current) return;
                                     const prev = playbackTimeRef.current;
                                     const start = Math.min(prev, t);
                                     const end = Math.max(prev, t);
@@ -1414,6 +1511,7 @@ function App() {
                                     lastPlaybackTimeRef.current = t;
                                 }}
                                 onScrubStateChange={(isScrubbing) => {
+                                    if (showRunningRef.current) return;
                                     if (isScrubbing) {
                                         setIsPlaying(false);
                                     } else {
@@ -1440,10 +1538,12 @@ function App() {
                                 showZoomWindow={true}
                                 title="Neural_Regions_V1.0"
                                 onCenterTap={() => {
+                                    if (showRunningRef.current) return;
                                     isManuallyPausedRef.current = !isManuallyPausedRef.current;
                                     setIsPlaying(!isManuallyPausedRef.current);
                                 }}
                                 onTimeScrub={(t) => {
+                                    if (showRunningRef.current) return;
                                     const prev = playbackTimeRef.current;
                                     const start = Math.min(prev, t);
                                     const end = Math.max(prev, t);
@@ -1520,6 +1620,7 @@ function App() {
                                     lastPlaybackTimeRef.current = t;
                                 }}
                                 onScrubStateChange={(isScrubbing) => {
+                                    if (showRunningRef.current) return;
                                     if (isScrubbing) {
                                         setIsPlaying(false);
                                     } else {
