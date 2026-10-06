@@ -35,3 +35,35 @@ export interface ActivityBin {
     time_end: number;
     spike_count: number;
 }
+
+// Show mode — mirrors the bridge's SHOW_STATE (server/show-runner.js).
+export interface ShowCue {
+    address: string;
+    frame: number;
+}
+
+export interface ShowConfig {
+    startIndex: number;
+    endIndex: number; // inclusive
+    fps: number;
+    offSeconds: number;
+    fadeSeconds: number;
+    indexAddress: string;
+    passStartCue: string;
+    onAddress: string;
+    offAddress: string;
+    spreadCues: { address: string; count: number }[];
+}
+
+export interface ShowState {
+    running: boolean;
+    pass: number;
+    phase: 'on' | 'off' | 'stopped';
+    index: number | null;
+    phaseElapsedMs: number;
+    phaseDurationMs: number;
+    config: ShowConfig;
+    cues: ShowCue[];
+    timing: { passFrames: number; passMs: number; cycleMs: number };
+    destinations: string[];
+}
