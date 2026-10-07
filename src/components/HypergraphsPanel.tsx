@@ -849,9 +849,9 @@ export const HypergraphsPanel: React.FC<HypergraphsPanelProps> = ({ spikes, neur
                 ) : (
                     <div className="viz-canvas" style={{
                         // Hypergraphs3D's own sizing classes have no CSS; in presentation a grid
-                        // stretches it to the box so its canvas fills the screen height.
+                        // stretches it to the square tile so its canvas fills it.
                         ...(presentation
-                            ? { display: 'grid', height: 'var(--pres-fit)', overflow: 'hidden' }
+                            ? { display: 'grid', width: '100%', aspectRatio: '1', maxHeight: 'var(--pres-fit)', overflow: 'hidden' }
                             : { minHeight: '600px' }),
                         border: showBurstSnapshot && frozenSnapshot ? '2px solid var(--color-accent)' : undefined
                     }}>

@@ -298,20 +298,18 @@ header {
     display: none;
 }
 
-/* auto-fit can't collapse empty columns while a full-width view spans them all, so the
-   column count is capped by the number of square views (--pres-cols) instead. */
+/* Wide views (show panel, activity analysis, real-time graph) on top at full width, then
+   the square views as tiles: --pres-tile gives 3 columns on a 1920 px screen, 4 on 2560. */
 .presentation .viz-section {
-    --pres-cols: 1;
+    --pres-tile: 560px;
     display: grid;
-    grid-template-columns: repeat(auto-fit,
-            minmax(max(min(100%, 600px), 100% / var(--pres-cols) - var(--pres-gutter)), 1fr));
-    grid-auto-flow: row dense;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--pres-tile)), 1fr));
     gap: var(--pres-gutter);
 }
 
-.presentation .viz-section:has(> :nth-child(2 of .pres-square)) { --pres-cols: 2; }
-.presentation .viz-section:has(> :nth-child(3 of .pres-square)) { --pres-cols: 3; }
-.presentation .viz-section:has(> :nth-child(4 of .pres-square)) { --pres-cols: 4; }
+.presentation .full-width {
+    order: -1;
+}
 
 .presentation .pres-square {
     display: flex;

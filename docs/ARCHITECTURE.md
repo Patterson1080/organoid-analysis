@@ -22,7 +22,7 @@ The spike CSV is a binary matrix: one row per millisecond, 131 neuron columns, `
 
 ## Presentation view
 
-`App`'s `presentation` state adds a `.presentation` class to the root and requests fullscreen (Keyboard Lock on Esc in Chromium; Esc twice or the bottom icon exits). CSS in `src/index.css` hides the header, controls and footer and lays the views out as a grid: `full-width` cells span the row, `pres-square` cells share it (column count capped by how many there are, via `:has()`), and `--pres-fit` caps a view at one screen height. Each view also takes a `presentation` prop to drop its own buttons/settings and size its canvas to the box.
+`App`'s `presentation` state adds a `.presentation` class to the root and requests fullscreen (Keyboard Lock on Esc in Chromium; Esc twice or the bottom icon exits). CSS in `src/index.css` hides the header, controls and footer and lays the views out as a grid: `full-width` cells go first (`order: -1`) and span the row, `pres-square` cells follow as equal tiles at least `--pres-tile` wide (`auto-fill`), and `--pres-fit` caps a view at one screen height. Each view also takes a `presentation` prop to drop its own buttons/settings and size its canvas to the box.
 
 ## Show mode
 
