@@ -8,6 +8,7 @@ import { calculateFiringRates, binSpikeActivity, SAMPLING_RATE } from '../utils/
 import { SpatialHeatmap } from './SpatialHeatmap';
 import { TemporalHeatmap } from './TemporalHeatmap';
 import { SpectralHeatmap } from './SpectralHeatmap';
+import { PresentationTile } from './PresentationTile';
 
 interface CanvasRasterPlotProps {
     spikes: SpikeEvent[];
@@ -152,84 +153,87 @@ interface SpikeActivityGraphsProps {
     spikes: SpikeEvent[];
     neurons: Neuron[];
     currentTime?: number; // Current playback time in ms (for moving indicator)
-    presentation?: boolean; // hide the toggles, size the charts to the viewport
+    presentation?: boolean; // hide the toggles; each chart becomes its own grid tile
 }
 
-// Memoized Static Charts Component
-const StaticCharts = React.memo(({ activityData, firingRateData, CustomTooltip, children, showNetworkActivity, showFiringRate, chartHeight }: any) => {
-    return (
-        <div className="grid" style={{ gridTemplateColumns: (showNetworkActivity && showFiringRate) ? '1fr 1fr' : '1fr' }}>
-            {/* Network Activity Timeline */}
-            {showNetworkActivity && (
-                <div className="viz-canvas" style={{ padding: 'var(--space-md)', position: 'relative' }}>
-                    <div className="data-label" style={{ marginBottom: 'var(--space-md)' }}>Network Activity (100ms bins)</div>
-                    <div style={{ height: chartHeight, width: '100%' }}>
-                        <ResponsiveContainer>
-                            <LineChart data={activityData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
-                                <XAxis
-                                    dataKey="timeMs"
-                                    type="number"
-                                    domain={[0, 180000]}
-                                    hide={true}
-                                />
-                                <YAxis
-                                    hide={true}
-                                    domain={['auto', 'auto']}
-                                />
-                                <Tooltip content={<CustomTooltip />} />
-                                <Line
-                                    type="monotone"
-                                    dataKey="count"
-                                    stroke="var(--color-accent)"
-                                    strokeWidth={2}
-                                    dot={false}
-                                    activeDot={{ r: 4, fill: 'var(--color-text-primary)' }}
-                                    isAnimationActive={false}
-                                />
-                            </LineChart>
-                        </ResponsiveContainer>
-                    </div>
-                    {children}
-                </div>
-            )}
+interface ActivityPoint { time: string; count: number; timeMs: number }
+interface FiringRatePoint { id: string; rate: string; count: number; isBackbone?: boolean }
 
-            {/* Firing Rate Distribution */}
-            {showFiringRate && (
-                <div className="viz-canvas" style={{ padding: 'var(--space-md)' }}>
-                    <div className="data-label" style={{ marginBottom: 'var(--space-md)' }}>Top 20 Active Neurons (Hz)</div>
-                    <div style={{ height: chartHeight, width: '100%' }}>
-                        <ResponsiveContainer>
-                            <BarChart data={firingRateData}>
-                                <XAxis
-                                    dataKey="id"
-                                    stroke="var(--color-text-secondary)"
-                                    fontSize={10}
-                                    tickLine={false}
-                                    axisLine={false}
-                                />
-                                <YAxis
-                                    stroke="var(--color-text-secondary)"
-                                    fontSize={10}
-                                    tickLine={false}
-                                    axisLine={false}
-                                />
-                                <Tooltip content={<CustomTooltip />} />
-                                <Bar dataKey="rate">
-                                    {firingRateData.map((entry: any, index: number) => (
-                                        <Cell
-                                            key={`cell-${index}`}
-                                            fill={entry.isBackbone ? 'var(--color-backbone)' : 'var(--color-neuron)'}
-                                        />
-                                    ))}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-});
+const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+        return (
+            <div style={{
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+                padding: '8px',
+                fontSize: '12px'
+            }}>
+                <p style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
+                <p style={{ color: 'var(--color-accent)' }}>
+                    {payload[0].value} {payload[0].name === 'rate' ? 'Hz' : ''}
+                </p>
+            </div>
+        );
+    }
+    return null;
+};
+
+// Memoized so playback ticks (currentTime) don't re-render the Recharts trees.
+const NetworkActivityChart = React.memo(({ data }: { data: ActivityPoint[] }) => (
+    <ResponsiveContainer>
+        <LineChart data={data} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+            <XAxis
+                dataKey="timeMs"
+                type="number"
+                domain={[0, 180000]}
+                hide={true}
+            />
+            <YAxis
+                hide={true}
+                domain={['auto', 'auto']}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Line
+                type="monotone"
+                dataKey="count"
+                stroke="var(--color-accent)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, fill: 'var(--color-text-primary)' }}
+                isAnimationActive={false}
+            />
+        </LineChart>
+    </ResponsiveContainer>
+));
+
+const FiringRateChart = React.memo(({ data }: { data: FiringRatePoint[] }) => (
+    <ResponsiveContainer>
+        <BarChart data={data}>
+            <XAxis
+                dataKey="id"
+                stroke="var(--color-text-secondary)"
+                fontSize={10}
+                tickLine={false}
+                axisLine={false}
+            />
+            <YAxis
+                stroke="var(--color-text-secondary)"
+                fontSize={10}
+                tickLine={false}
+                axisLine={false}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Bar dataKey="rate">
+                {data.map((entry, index) => (
+                    <Cell
+                        key={`cell-${index}`}
+                        fill={entry.isBackbone ? 'var(--color-backbone)' : 'var(--color-neuron)'}
+                    />
+                ))}
+            </Bar>
+        </BarChart>
+    </ResponsiveContainer>
+));
 
 export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes, neurons, currentTime, presentation = false }) => {
     // 1. Network Activity (Spikes over time)
@@ -261,7 +265,7 @@ export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes
         resizeObserver.observe(heatmapContainerRef.current);
 
         return () => resizeObserver.disconnect();
-    }, [showHeatmaps]);
+    }, [showHeatmaps, presentation]); // the heatmap container is remounted when presentation toggles
 
     const activityData = useMemo(() => {
         return binSpikeActivity(spikes, 100, 180000).map(bin => ({
@@ -284,38 +288,178 @@ export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes
 
     if (spikes.length === 0) return null;
 
-    const CustomTooltip = ({ active, payload, label }: any) => {
-        if (active && payload && payload.length) {
-            return (
-                <div style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    padding: '8px',
-                    fontSize: '12px'
-                }}>
-                    <p style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
-                    <p style={{ color: 'var(--color-accent)' }}>
-                        {payload[0].value} {payload[0].name === 'rate' ? 'Hz' : ''}
-                    </p>
-                </div>
-            );
-        }
-        return null;
-    };
-
     // Calculate Cursor Position %
     // Assuming activityData covers the full range from 0 to end
     const totalDuration = 180000; // Fixed 180s
     const cursorLeft = currentTime !== undefined ? (currentTime / totalDuration) * 100 : 0;
-    const chartHeight = presentation ? 'clamp(200px, 24dvh, 420px)' : '200px';
-    const rasterHeight = presentation ? 'clamp(360px, 55dvh, 1100px)' : '600px';
+
+    const networkActivity = (
+        <>
+            <NetworkActivityChart data={activityData} />
+            {currentTime !== undefined && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        left: `${cursorLeft}%`,
+                        top: 0,
+                        bottom: 0,
+                        width: '2px',
+                        background: '#ff6b6b',
+                        opacity: 0.8,
+                        boxShadow: '0 0 4px rgba(255, 107, 107, 0.5)',
+                        pointerEvents: 'none'
+                    }}
+                />
+            )}
+        </>
+    );
+
+    // Raster Plot (Canvas-based for performance)
+    const raster = (
+        <>
+            <CanvasRasterPlot spikes={spikes} />
+
+            {/* Raster Plot Cursor */}
+            {currentTime !== undefined && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        left: `calc(50px + (100% - 70px) * ${cursorLeft / 100})`,
+                        top: '20px',
+                        bottom: '40px',
+                        width: '2px',
+                        background: '#ff6b6b',
+                        opacity: 0.8,
+                        pointerEvents: 'none'
+                    }}
+                />
+            )}
+        </>
+    );
+
+    const heatmaps = (
+        <div ref={heatmapContainerRef} style={{ width: '100%', maxWidth: '100%' }}>
+            <div className="grid" style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: '0px', // Zero gap so they touch
+                width: '100%',
+                margin: '0 auto'
+            }}>
+                {/* Spatial Heatmap (Top Left) */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0' }}>
+                    <div className="data-label" style={{ marginBottom: '4px', fontSize: '0.8em', color: '#888' }}>Spatial Activity (Last 1s)</div>
+                    <SpatialHeatmap
+                        spikes={spikes}
+                        neurons={neurons}
+                        currentTime={currentTime || 0}
+                        width={heatmapSize}
+                        height={heatmapSize}
+                    />
+                </div>
+
+                {/* Temporal Waterfall Heatmap (Top Right) */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0' }}>
+                    <div className="data-label" style={{ marginBottom: '4px', fontSize: '0.8em', color: '#888' }}>Temporal Waterfall (Last 5s)</div>
+                    <TemporalHeatmap
+                        spikes={spikes}
+                        neurons={neurons}
+                        currentTime={currentTime || 0}
+                        width={heatmapSize}
+                        height={heatmapSize}
+                    />
+                </div>
+
+                {/* Spectral Power Heatmap (Bottom Left) */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0' }}>
+                    <SpectralHeatmap
+                        spikes={spikes}
+                        neurons={neurons}
+                        width={heatmapSize}
+                        height={heatmapSize}
+                    />
+                    <div className="data-label" style={{ marginTop: '4px', fontSize: '0.8em', color: '#888' }}>Spectral Power (0-100Hz)</div>
+                </div>
+
+                {/* Empty Slot (Bottom Right) */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0' }}>
+                    <div style={{
+                        width: heatmapSize,
+                        height: heatmapSize,
+                        border: '1px solid #222',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: '#050505'
+                    }}>
+                        <span style={{ color: '#333', fontSize: '0.8em' }}>[EMPTY SLOT]</span>
+                    </div>
+                    {/* Placeholder label to match height if needed, or just empty space */}
+                    <div className="data-label" style={{ marginTop: '4px', fontSize: '0.8em', color: 'transparent' }}>.</div>
+                </div>
+            </div>
+        </div>
+    );
+
+    const stats = (
+        <div className="flex gap-lg" style={{ marginTop: 'var(--space-md)' }}>
+            <div>
+                <div className="data-label">Total Spikes</div>
+                <div className="data-value">{spikes.length}</div>
+            </div>
+            <div>
+                <div className="data-label">Duration</div>
+                <div className="data-value">
+                    180.00s
+                </div>
+            </div>
+            <div>
+                <div className="data-label">Sampling Rate</div>
+                <div className="data-value">{SAMPLING_RATE / 1000} kHz</div>
+            </div>
+        </div>
+    );
+
+    if (presentation) {
+        return (
+            <>
+                {showNetworkActivity && (
+                    <PresentationTile id="activity-network" presentation>
+                        <h2>Network Activity (100ms bins)</h2>
+                        <div className="pres-box">{networkActivity}</div>
+                        {stats}
+                    </PresentationTile>
+                )}
+                {showFiringRate && (
+                    <PresentationTile id="activity-rates" presentation>
+                        <h2>Top 20 Active Neurons (Hz)</h2>
+                        <div className="pres-box">
+                            <FiringRateChart data={firingRateData} />
+                        </div>
+                    </PresentationTile>
+                )}
+                {showRaster && (
+                    <PresentationTile id="activity-raster" presentation>
+                        <h2>Spike Raster Plot (All Data)</h2>
+                        <div className="pres-box">{raster}</div>
+                    </PresentationTile>
+                )}
+                {showHeatmaps && (
+                    <PresentationTile id="activity-heatmaps" presentation>
+                        <h2>Heatmaps</h2>
+                        {heatmaps}
+                    </PresentationTile>
+                )}
+            </>
+        );
+    }
 
     return (
         <div className="data-panel">
             <h2 style={{ marginBottom: 'var(--space-lg)' }}>Spike Activity Analysis</h2>
 
             {/* Toggle Buttons */}
-            {!presentation && <div className="flex gap-sm" style={{ marginBottom: 'var(--space-md)' }}>
+            <div className="flex gap-sm" style={{ marginBottom: 'var(--space-md)' }}>
                 <button className={`btn ${showNetworkActivity ? 'active' : ''}`} onClick={() => setShowNetworkActivity(!showNetworkActivity)}>
                     {showNetworkActivity ? 'Hide Network' : 'Show Network'}
                 </button>
@@ -328,158 +472,41 @@ export const SpikeActivityGraphs: React.FC<SpikeActivityGraphsProps> = ({ spikes
                 <button className={`btn ${showHeatmaps ? 'active' : ''}`} onClick={() => setShowHeatmaps(!showHeatmaps)}>
                     {showHeatmaps ? 'Hide Heatmaps' : 'Show Heatmaps'}
                 </button>
-            </div>}
-
-            <div style={{ position: 'relative' }}>
-                {(showNetworkActivity || showFiringRate) && (
-                    <StaticCharts
-                        activityData={activityData}
-                        firingRateData={firingRateData}
-                        CustomTooltip={CustomTooltip}
-                        showNetworkActivity={showNetworkActivity}
-                        showFiringRate={showFiringRate}
-                        chartHeight={chartHeight}
-                    >
-                        {/* Overlay Cursor for Network Activity Chart */}
-                        {showNetworkActivity && currentTime !== undefined && (
-                            <div
-                                style={{
-                                    position: 'absolute',
-                                    top: '45px', // Below label
-                                    left: 'var(--space-md)', // Match padding
-                                    right: 'var(--space-md)', // Match padding
-                                    height: chartHeight,
-                                    pointerEvents: 'none',
-                                    overflow: 'hidden'
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        position: 'absolute',
-                                        left: `${cursorLeft}%`,
-                                        top: 0,
-                                        bottom: 0,
-                                        width: '2px',
-                                        background: '#ff6b6b',
-                                        opacity: 0.8,
-                                        boxShadow: '0 0 4px rgba(255, 107, 107, 0.5)'
-                                    }}
-                                />
-                            </div>
-                        )}
-                    </StaticCharts>
-                )}
             </div>
 
-            {/* Raster Plot (Canvas-based for performance) */}
+            {(showNetworkActivity || showFiringRate) && (
+                <div className="grid" style={{ gridTemplateColumns: (showNetworkActivity && showFiringRate) ? '1fr 1fr' : '1fr' }}>
+                    {showNetworkActivity && (
+                        <div className="viz-canvas" style={{ padding: 'var(--space-md)' }}>
+                            <div className="data-label" style={{ marginBottom: 'var(--space-md)' }}>Network Activity (100ms bins)</div>
+                            <div style={{ height: '200px', width: '100%', position: 'relative' }}>{networkActivity}</div>
+                        </div>
+                    )}
+                    {showFiringRate && (
+                        <div className="viz-canvas" style={{ padding: 'var(--space-md)' }}>
+                            <div className="data-label" style={{ marginBottom: 'var(--space-md)' }}>Top 20 Active Neurons (Hz)</div>
+                            <div style={{ height: '200px', width: '100%' }}>
+                                <FiringRateChart data={firingRateData} />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {showRaster && (
                 <div className="viz-canvas" style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)' }}>
                     <div className="data-label" style={{ marginBottom: 'var(--space-md)' }}>Spike Raster Plot (All Data)</div>
-                    <div style={{ height: rasterHeight, width: '100%', position: 'relative' }}>
-                        <CanvasRasterPlot spikes={spikes} />
-
-                        {/* Raster Plot Cursor */}
-                        {currentTime !== undefined && (
-                            <div
-                                style={{
-                                    position: 'absolute',
-                                    left: `calc(50px + (100% - 70px) * ${cursorLeft / 100})`,
-                                    top: '20px',
-                                    bottom: '40px',
-                                    width: '2px',
-                                    background: '#ff6b6b',
-                                    opacity: 0.8,
-                                    pointerEvents: 'none'
-                                }}
-                            />
-                        )}
-                    </div>
+                    <div style={{ height: '600px', width: '100%', position: 'relative' }}>{raster}</div>
                 </div>
             )}
 
-            {/* Heatmap Section */}
             {showHeatmaps && (
                 <div className="viz-canvas" style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)' }}>
-                    <div ref={heatmapContainerRef} style={{ width: '100%', maxWidth: '100%' }}>
-                        <div className="grid" style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(2, 1fr)',
-                            gap: '0px', // Zero gap so they touch
-                            width: '100%',
-                            margin: '0 auto'
-                        }}>
-                            {/* Spatial Heatmap (Top Left) */}
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0' }}>
-                                <div className="data-label" style={{ marginBottom: '4px', fontSize: '0.8em', color: '#888' }}>Spatial Activity (Last 1s)</div>
-                                <SpatialHeatmap
-                                    spikes={spikes}
-                                    neurons={neurons}
-                                    currentTime={currentTime || 0}
-                                    width={heatmapSize}
-                                    height={heatmapSize}
-                                />
-                            </div>
-
-                            {/* Temporal Waterfall Heatmap (Top Right) */}
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0' }}>
-                                <div className="data-label" style={{ marginBottom: '4px', fontSize: '0.8em', color: '#888' }}>Temporal Waterfall (Last 5s)</div>
-                                <TemporalHeatmap
-                                    spikes={spikes}
-                                    neurons={neurons}
-                                    currentTime={currentTime || 0}
-                                    width={heatmapSize}
-                                    height={heatmapSize}
-                                />
-                            </div>
-
-                            {/* Spectral Power Heatmap (Bottom Left) */}
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0' }}>
-                                <SpectralHeatmap
-                                    spikes={spikes}
-                                    neurons={neurons}
-                                    width={heatmapSize}
-                                    height={heatmapSize}
-                                />
-                                <div className="data-label" style={{ marginTop: '4px', fontSize: '0.8em', color: '#888' }}>Spectral Power (0-100Hz)</div>
-                            </div>
-
-                            {/* Empty Slot (Bottom Right) */}
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0' }}>
-                                <div style={{
-                                    width: heatmapSize,
-                                    height: heatmapSize,
-                                    border: '1px solid #222',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    background: '#050505'
-                                }}>
-                                    <span style={{ color: '#333', fontSize: '0.8em' }}>[EMPTY SLOT]</span>
-                                </div>
-                                {/* Placeholder label to match height if needed, or just empty space */}
-                                <div className="data-label" style={{ marginTop: '4px', fontSize: '0.8em', color: 'transparent' }}>.</div>
-                            </div>
-                        </div>
-                    </div>
+                    {heatmaps}
                 </div>
             )}
 
-            <div className="flex gap-lg" style={{ marginTop: 'var(--space-md)' }}>
-                <div>
-                    <div className="data-label">Total Spikes</div>
-                    <div className="data-value">{spikes.length}</div>
-                </div>
-                <div>
-                    <div className="data-label">Duration</div>
-                    <div className="data-value">
-                        180.00s
-                    </div>
-                </div>
-                <div>
-                    <div className="data-label">Sampling Rate</div>
-                    <div className="data-value">{SAMPLING_RATE / 1000} kHz</div>
-                </div>
-            </div>
+            {stats}
         </div >
     );
 };
