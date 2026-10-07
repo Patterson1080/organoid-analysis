@@ -298,12 +298,15 @@ header {
     display: none;
 }
 
-/* Wide views (show panel, activity analysis, real-time graph) on top at full width, then
-   the square views as tiles: --pres-tile gives 3 columns on a 1920 px screen, 4 on 2560. */
+/* Wide views (show panel, real-time graph) on top at full width, then the other views as
+   tiles: --pres-tile gives 3 columns on a 1920 px screen, 4 on 2560. A tile spans 1 column,
+   2 or the full row (PresentationTile); --pres-span is that width in columns. */
 .presentation .viz-section {
     --pres-tile: 560px;
+    container-type: inline-size;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--pres-tile)), 1fr));
+    grid-auto-flow: row dense; /* later tiles fill the hole a wide tile leaves */
     gap: var(--pres-gutter);
 }
 
@@ -311,20 +314,68 @@ header {
     order: -1;
 }
 
+/* Activity Analysis wrapper: its charts are tiles of the grid themselves. */
+.presentation .pres-contents {
+    display: contents;
+}
+
 .presentation .pres-square {
+    --pres-span: 1;
     display: flex;
     flex-direction: column;
     min-width: 0;
 }
 
-/* Box for the 3D scenes: square, but never taller than the screen. */
+.presentation .pres-span-2 {
+    --pres-span: 2;
+    grid-column: span 2;
+}
+
+.presentation .pres-span-full {
+    --pres-span: 3;
+    grid-column: 1 / -1;
+}
+
+/* Narrower than two tiles (2 × --pres-tile + gap) the grid has one column; a 2-column span
+   would add an implicit one. */
+@container (width < 1136px) {
+    .presentation .pres-span-2 {
+        --pres-span: 1;
+        grid-column: auto;
+    }
+}
+
+/* Box for the 3D scenes and charts: one column tall, wider when the tile spans more
+   columns, never taller than the screen. */
 .presentation .pres-box {
     width: 100%;
-    aspect-ratio: 1;
+    aspect-ratio: var(--pres-span);
     max-height: var(--pres-fit);
     min-height: 320px;
     overflow: hidden;
     position: relative;
+}
+
+.pres-span-toggle {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    z-index: 10;
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.grid-cell:hover > .pres-span-toggle,
+.pres-span-toggle:focus-visible {
+    opacity: 1;
 }
 
 .presentation-exit {

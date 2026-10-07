@@ -12,6 +12,7 @@ import { HypergraphsPanel } from './components/HypergraphsPanel';
 import { CircularEventGraph } from './components/CircularEventGraph';
 import { NeuralWebGraph } from './components/NeuralWebGraph';
 import { ShowPanel, ShowStateSnapshot } from './components/ShowPanel';
+import { PresentationTile } from './components/PresentationTile';
 
 import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
 import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
@@ -1418,7 +1419,7 @@ function App() {
                     )}
 
                     {showOrganoid && neurons.length > 0 && (
-                        <div className="grid-cell pres-square">
+                        <PresentationTile id="organoid" presentation={presentation}>
                             <h2>Organoid Map (3D)</h2>
                             <div className="pres-box">
                             <Organoid3D
@@ -1437,14 +1438,18 @@ function App() {
                                 presentation={presentation}
                             />
                             </div>
-                        </div>
+                        </PresentationTile>
                     )}
 
                     {showSpikeAnalysis && visibleSpikes.length > 0 && (
-                        <div className="grid-cell full-width">
-                            <div className="flex justify-between items-center" style={{ marginBottom: 'var(--space-md)' }}>
-                                <h2 style={{ margin: 0 }}>Activity Analysis</h2>
-                            </div>
+                        // In presentation the panel's charts are separate tiles of the grid; the
+                        // wrapper stays mounted (display: contents) so the chart toggles survive.
+                        <div className={presentation ? 'pres-contents' : 'grid-cell full-width'}>
+                            {!presentation && (
+                                <div className="flex justify-between items-center" style={{ marginBottom: 'var(--space-md)' }}>
+                                    <h2 style={{ margin: 0 }}>Activity Analysis</h2>
+                                </div>
+                            )}
                             <SpikeActivityGraphs
                                 spikes={visibleSpikes}
                                 neurons={neurons}
@@ -1455,7 +1460,7 @@ function App() {
                     )}
 
                     {showPCA && visibleSpikes.length > 0 && (
-                        <div className="grid-cell pres-square">
+                        <PresentationTile id="pca" presentation={presentation}>
                             <h2 style={{ marginBottom: 'var(--space-md)' }}>PCA Trajectory (3D)</h2>
                             <div className="pres-box">
                             <PCA3D
@@ -1465,7 +1470,7 @@ function App() {
                                 presentation={presentation}
                             />
                             </div>
-                        </div>
+                        </PresentationTile>
                     )}
 
                     {showRealTimeGraph && allSpikesRef.current.length > 0 && (
@@ -1486,7 +1491,7 @@ function App() {
                     )}
 
                     {showHypergraphs && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell pres-square">
+                        <PresentationTile id="hypergraphs" presentation={presentation}>
                             <HypergraphsPanel
                                 spikes={allSpikesRef.current}
                                 neurons={neurons}
@@ -1494,11 +1499,11 @@ function App() {
                                 isPlaying={isPlaying || showOn}
                                 presentation={presentation}
                             />
-                        </div>
+                        </PresentationTile>
                     )}
 
                     {showCircularGraph && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell pres-square">
+                        <PresentationTile id="circular" presentation={presentation}>
                             <CircularEventGraph
                                 spikes={allSpikesRef.current}
                                 neurons={neurons}
@@ -1602,11 +1607,11 @@ function App() {
                                     }
                                 }}
                             />
-                        </div>
+                        </PresentationTile>
                     )}
 
                     {showRegionsGraph && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell pres-square">
+                        <PresentationTile id="regions" presentation={presentation}>
                             <CircularEventGraph
                                 spikes={allSpikesRef.current}
                                 neurons={neurons}
@@ -1712,12 +1717,12 @@ function App() {
                                     }
                                 }}
                             />
-                        </div>
+                        </PresentationTile>
                     )}
 
 
                     {showNeuralWeb && allSpikesRef.current.length > 0 && (
-                        <div className="grid-cell pres-square">
+                        <PresentationTile id="neuralweb" presentation={presentation}>
                             <h2>Neural Web (Lissajous · Time Cube)</h2>
                             <NeuralWebGraph
                                 spikes={allSpikesRef.current}
@@ -1730,7 +1735,7 @@ function App() {
                                 exportResolution={2048}
                                 presentation={presentation}
                             />
-                        </div>
+                        </PresentationTile>
                     )}
 
                     {!presentation && !showOrganoid && !showSpikeAnalysis && !showPCA && !showRealTimeGraph && !showHypergraphs
