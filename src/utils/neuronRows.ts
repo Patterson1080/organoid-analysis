@@ -16,7 +16,7 @@ export function neuronsFromRows(headers: string[], rows: any[]): Neuron[] {
     const idCol = findColumn(headers, ['neuron_id', 'id', 'neuron', 'label', 'unit_id']);
     const xCol = findColumn(headers, ['x', 'x_pos', 'x_coord', 'x_location', 'pos_x', 'xy_norm_0']);
     const yCol = findColumn(headers, ['y', 'y_pos', 'y_coord', 'y_location', 'pos_y', 'xy_norm_1']);
-    const backboneCol = findColumn(headers, ['is_backbone', 'backbone', 'type', 'is_anchor']);
+    const backboneCol = findColumn(headers, ['is_backbone', 'backbone', 'backbone_labels', 'type', 'is_anchor']);
     if (!xCol || !yCol) return [];
 
     return rows
