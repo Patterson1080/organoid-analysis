@@ -96,7 +96,7 @@ if (first.destinations.join() !== '127.0.0.1:1234') fail(`default destination ${
 
 // data/ goes to local pages; another site gets nothing.
 const status = await get('/data/status', 'http://localhost:5173');
-if (status.status !== 200 || status.allow !== 'http://localhost:5173' || status.body !== '{"neurons":true,"spikes":true}') {
+if (status.status !== 200 || status.allow !== 'http://localhost:5173' || status.body !== '{"neurons":true,"spikes":true,"firing":false,"vessel":false}') {
     fail(`data status ${JSON.stringify(status)}`);
 }
 if ((await get('/data/neurons.csv', 'http://localhost:5173')).body !== neuronsCsv) fail('neurons.csv not served as-is');

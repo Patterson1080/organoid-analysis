@@ -255,6 +255,15 @@ ln -s ~/Developer/Fabrication/PDE_SimulacraNaturae/data/organoid/time_series_dat
 
 The bridge reads both at startup (about a second for the 612 MB matrix) and serves them to the page (`http://127.0.0.1:8080/data/`, local pages only), which loads them on connect when nothing was uploaded. A manual upload still works for other datasets. `data/` is gitignored.
 
+Two optional files feed the routing view in the SHOW panel: EoC's firing blob (the normalized rates EoC actually reads) and the vessel's G-code. Without them the Visual card falls back to spikes and the Fabrication card says the G-code is missing.
+
+```bash
+ln -s ~/Developer/Graphics/EoC-biomes-compute/Assets/StreamingAssets/biomes11/organoid_firing.f16 data/organoid_firing.f16
+ln -s ~/Developer/Fabrication/PDE_SimulacraNaturae/data/gcodes/single-object-436666.gcode data/vessel.gcode
+```
+
+Incoming `/routing/*` OSC (the audio computer's telemetry for the routing view) isn't logged by the bridge.
+
 EoC needs the `/sim_off` · `/sim_on` handlers from its `show-sim-off` branch.
 
 ## Spout Output
