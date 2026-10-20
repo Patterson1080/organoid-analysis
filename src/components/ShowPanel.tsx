@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { ShowConfig, ShowState, SpikeEvent } from '../types';
+import type { Neuron, ShowConfig, ShowState, SpikeEvent } from '../types';
+import type { LedFrame } from '../show/ledFrame';
 import { cueLabel, cyclePosition, extrapolateIndex, formatClock, lowerBound, phaseRemainingMs, rateBins } from '../show/showMath';
+import type { FiringBlob } from '../show/routing/firingBlob';
+import type { Telemetry } from '../show/routing/telemetry';
+import type { Vessel } from '../show/routing/vessel';
+import { RoutingView } from './RoutingView';
 
 export interface ShowStateSnapshot {
     state: ShowState;
@@ -16,6 +21,13 @@ interface ShowPanelProps {
     onStart: (config: ShowConfig) => void;
     onStop: () => void;
     presentation?: boolean;   // read-only: no start/stop or config fields, taller raster
+    // The routing view below the timeline
+    neurons: Neuron[];
+    playbackTimeRef: React.MutableRefObject<number>;   // local playback, when no show runs
+    ledFrameRef: React.MutableRefObject<LedFrame | null>;
+    telemetryRef: React.MutableRefObject<Telemetry>;
+    firingBlob: FiringBlob | null;
+    vessel: Vessel | null;
 }
 
 const RASTER_HALF_MS = 1000;   // raster shows ±1 s of data around the playhead
@@ -63,7 +75,7 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
-export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false }: ShowPanelProps) {
+export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false, neurons, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel }: ShowPanelProps) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
@@ -293,6 +305,18 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
                 style={{ fontFamily: 'var(--font-mono)', fontSize: presentation ? '15px' : '12px', letterSpacing: '0.06em', marginBottom: 'var(--space-sm)', minHeight: '1.4em' }}
             />
             <canvas ref={canvasRef} style={{ display: 'block' }} />
+            <RoutingView
+                neurons={neurons}
+                spikes={spikes}
+                showLatestRef={latestRef}
+                playbackTimeRef={playbackTimeRef}
+                ledFrameRef={ledFrameRef}
+                telemetryRef={telemetryRef}
+                firingBlob={firingBlob}
+                vessel={vessel}
+                connected={connected}
+                presentation={presentation}
+            />
             {!presentation && <div className="flex" style={{ gap: 'var(--space-md)', flexWrap: 'wrap', marginTop: 'var(--space-md)' }}>
                 {field('Start idx', 'startIndex')}
                 {field('End idx', 'endIndex')}

@@ -18,6 +18,12 @@ import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
 import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
 import { spikesBetween } from './show/showMath';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledFrame';
+import type { LedFrame } from './show/ledFrame';
+import { parseFiringBlob } from './show/routing/firingBlob';
+import type { FiringBlob } from './show/routing/firingBlob';
+import { applyTelemetry, createTelemetry } from './show/routing/telemetry';
+import { parseVesselGcode } from './show/routing/vessel';
+import type { Vessel } from './show/routing/vessel';
 import { parseNeuronCSV, parseSpikeCSV } from './utils/dataProcessing';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
 
@@ -142,6 +148,12 @@ function App() {
     // handleShowState callback; and the last show index whose spikes were emitted.
     const emitFrameOutputsRef = useRef<(spikesInFrame: SpikeEvent[], frameTime: number) => void>(() => {});
     const lastShowIndexRef = useRef<number | null>(null);
+    // The routing view's inputs: the last LED frame emitFrameOutputs computed (sent or not), the
+    // audio computer's /routing/* telemetry, and the optional data/ files it draws from.
+    const lastLedFrameRef = useRef<LedFrame | null>(null);
+    const routingTelemetryRef = useRef(createTelemetry());
+    const [firingBlob, setFiringBlob] = useState<FiringBlob | null>(null);
+    const [vessel, setVessel] = useState<Vessel | null>(null);
     const showRunning = !!showState?.running;
     const showOn = showRunning && showState?.phase === 'on';
 
@@ -272,6 +284,8 @@ function App() {
                 try {
                     const data = JSON.parse(event.data);
                     if (data.type === 'OSC_MSG') {
+                        // Telemetry for the routing view arrives many times a second: kept out of React state.
+                        if (applyTelemetry(routingTelemetryRef.current, data.payload.address, data.payload.args, performance.now())) return;
                         setLastOscMessage(data.payload);
                         // Handle /row input
                         if (data.payload.address === '/row' && data.payload.args.length > 0) {
@@ -494,6 +508,15 @@ function App() {
         };
         (async () => {
             const status = await (await fetch(`${base}/status`)).json();
+            // The routing view's optional files, each on its own so a bad one costs only its card.
+            if (status.firing) {
+                fetch(`${base}/organoid_firing.f16`).then(r => r.arrayBuffer()).then(b => setFiringBlob(parseFiringBlob(b)))
+                    .catch(e => console.warn('data/organoid_firing.f16:', e));
+            }
+            if (status.vessel) {
+                fetch(`${base}/vessel.gcode`).then(r => r.text()).then(t => setVessel(parseVesselGcode(t)))
+                    .catch(e => console.warn('data/vessel.gcode:', e));
+            }
             if (!status.neurons && !status.spikes) return;
             setBridgeDataStatus('Loading data/ from the bridge…');
             if (status.neurons && neurons.length === 0) handleNeuronsLoaded(await parseNeuronCSV(await fetchCsv('neurons.csv')));
@@ -740,6 +763,7 @@ function App() {
             neuronBoundsRef.current,
         );
         recentFiringNeuronsRef.current = trail;
+        if (frame) lastLedFrameRef.current = frame;
 
         // Play sound for spikes in this frame
         if (soundEnabled && spikesInFrame.length > 0) {
@@ -1414,6 +1438,12 @@ function App() {
                                 onStart={config => sendShow({ type: 'SHOW_START', payload: { config } })}
                                 onStop={() => sendShow({ type: 'SHOW_STOP' })}
                                 presentation={presentation}
+                                neurons={neurons}
+                                playbackTimeRef={playbackTimeRef}
+                                ledFrameRef={lastLedFrameRef}
+                                telemetryRef={routingTelemetryRef}
+                                firingBlob={firingBlob}
+                                vessel={vessel}
                             />
                         </div>
                     )}
