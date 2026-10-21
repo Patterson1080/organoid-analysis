@@ -255,7 +255,7 @@ So the view draws each object true to its own geometry. The arrangement appears 
 
 ### Asset
 
-`scripts/termite-form.mjs <obj> [out=data/termite_slices.bin] [step=2] [tolerance=0.25]` makes the page's asset: horizontal slice contours, the way a slicer sees the form and the way the documentation draws it (stacked white contours).
+`scripts/termite-slices.mjs <obj> [out=data/termite_slices.bin] [step=2] [tolerance=0.25]` makes the page's asset: horizontal slice contours, the way a slicer sees the form and the way the documentation draws it (stacked white contours).
 
 **Why slices, not points.** Two throwaway prototypes rendered sampled surface points:
 
