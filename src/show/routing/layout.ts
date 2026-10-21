@@ -1,6 +1,8 @@
 // Where everything sits in the routing view, from the space it actually gets: the screen
 // changes between shows, landscape or portrait, and presentation uses all of it.
 
+import { organoidCable, patchArc } from './cables.ts';
+import type { Cable, Edge } from './cables.ts';
 import { AUDIO_COMPUTER, BRIDGE_FED, MEDIA } from './facts.ts';
 import type { MediumKey } from './facts.ts';
 
@@ -16,6 +18,8 @@ export interface RoutingLayout {
     centre: { cx: number; cy: number; r: number };
     cards: Record<MediumKey, Box>;
     audioFrame: Box;
+    cables: Record<'visual' | 'led' | 'fab' | 'sound', Cable>; // from the organoid: the bridge's three, and /index to the audio computer
+    strikes: Cable; // Max to the solenoids
     scale: number;
 }
 
@@ -31,6 +35,7 @@ export interface DetailLayout {
 }
 
 const LANDSCAPE_RATIO = 1.1;
+const CABLE_CHANNEL = 0.28; // the cables' room between the organoid and the cards, as a share of its radius
 // Each card's share of its column (landscape) or row (portrait), in BRIDGE_FED / AUDIO_COMPUTER order.
 const BRIDGE_SHARES = [0.45, 0.25, 0.3];
 const AUDIO_SHARES = [0.34, 0.26, 0.4];
@@ -67,22 +72,32 @@ export function routingLayout(w: number, h: number): RoutingLayout {
     const cx = w / 2, cy = h / 2;
     const landscape = isLandscape(w, h);
     const r = landscape ? Math.min(0.42 * h, 0.16 * w) : Math.min(0.16 * h, 0.42 * w);
+    const ch = Math.max(g, CABLE_CHANNEL * r);
     const cards = {} as Record<MediumKey, Box>;
     let audioFrame: Box;
     if (landscape) {
-        const left: Box = { x: m, y: m, w: cx - r - g - m, h: h - 2 * m };
-        audioFrame = { x: cx + r + g, y: m, w: w - m - (cx + r + g), h: h - 2 * m };
+        const left: Box = { x: m, y: m, w: cx - r - ch - m, h: h - 2 * m };
+        audioFrame = { x: cx + r + ch, y: m, w: w - m - (cx + r + ch), h: h - 2 * m };
         split(left.y, left.h, BRIDGE_SHARES, g).forEach(([y, len], i) => { cards[BRIDGE_FED[i]] = { x: left.x, y, w: left.w, h: len }; });
         const inner = { x: audioFrame.x + g / 2, y: audioFrame.y + band, w: audioFrame.w - g, h: audioFrame.h - band - g / 2 };
         split(inner.y, inner.h, AUDIO_SHARES, g).forEach(([y, len], i) => { cards[AUDIO_COMPUTER[i]] = { x: inner.x, y, w: inner.w, h: len }; });
     } else {
-        const top: Box = { x: m, y: m, w: w - 2 * m, h: cy - r - g - m };
-        audioFrame = { x: m, y: cy + r + g, w: w - 2 * m, h: h - m - (cy + r + g) };
+        const top: Box = { x: m, y: m, w: w - 2 * m, h: cy - r - ch - m };
+        audioFrame = { x: m, y: cy + r + ch, w: w - 2 * m, h: h - m - (cy + r + ch) };
         split(top.x, top.w, BRIDGE_SHARES, g).forEach(([x, len], i) => { cards[BRIDGE_FED[i]] = { x, y: top.y, w: len, h: top.h }; });
         const inner = { x: audioFrame.x + g / 2, y: audioFrame.y + band, w: audioFrame.w - g, h: audioFrame.h - band - g / 2 };
         split(inner.x, inner.w, AUDIO_SHARES, g).forEach(([x, len], i) => { cards[AUDIO_COMPUTER[i]] = { x, y: inner.y, w: len, h: inner.h }; });
     }
-    return { orientation: landscape ? 'landscape' : 'portrait', centre: { cx, cy, r }, cards, audioFrame, scale };
+    // Each cable meets the card edge that faces the organoid: across the channel, or up or down it.
+    const centre = { cx, cy, r }, bridge: Edge = landscape ? 'right' : 'bottom', audio: Edge = landscape ? 'left' : 'top';
+    const cables = {
+        visual: organoidCable(centre, cards.visual, bridge),
+        led: organoidCable(centre, cards.led, bridge),
+        fab: organoidCable(centre, cards.fab, bridge),
+        sound: organoidCable(centre, cards.sound, audio),
+    };
+    const strikes = patchArc(cards.sound, cards.solenoids, audio, 0.8 * ch);
+    return { orientation: landscape ? 'landscape' : 'portrait', centre, cards, audioFrame, cables, strikes, scale };
 }
 
 export function detailLayout(w: number, h: number): DetailLayout {

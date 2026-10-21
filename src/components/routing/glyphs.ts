@@ -13,12 +13,30 @@ export const MONO = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, mono
 const TAU = Math.PI * 2;
 export const LINE_H = 1.45; // a lines() row, in font heights
 
-export function text(g: G, s: string, x: number, y: number, px: number, color: string, align: CanvasTextAlign = 'left'): void {
+/** `s` at (x, y), cut with an ellipsis to `maxW` when one is given. */
+export function text(g: G, s: string, x: number, y: number, px: number, color: string, align: CanvasTextAlign = 'left', maxW = Infinity): void {
     g.font = `${px}px ${MONO}`;
     g.fillStyle = color;
     g.textAlign = align;
     g.textBaseline = 'top';
-    g.fillText(s, x, y);
+    g.fillText(maxW < Infinity ? fit(g, s, maxW, px) : s, x, y);
+}
+
+/** A word cut into pieces no wider than `w` (a file name in a narrow column), in the current font;
+ *  whole when not even a character fits. */
+function pieces(g: G, word: string, w: number): string[] {
+    if (g.measureText(word).width <= w || g.measureText(word.slice(0, 1)).width > w) return [word];
+    const out: string[] = [];
+    let cur = '';
+    for (const ch of word) {
+        if (cur && g.measureText(cur + ch).width > w) {
+            out.push(cur);
+            cur = ch;
+        } else {
+            cur += ch;
+        }
+    }
+    return [...out, cur];
 }
 
 /** The rows as lines() draws them: each wrapped at spaces to `w` in the font at `px`. */
@@ -40,20 +58,28 @@ function wrapped(g: G, rows: [string, string][], w: number, px: number): [string
             } else {
                 line = next;
             }
+            if (line === word) { // only a word that starts a line can be wider than the box
+                const cut = pieces(g, word, w);
+                for (const piece of cut.slice(0, -1)) out.push([piece, color]);
+                line = cut[cut.length - 1];
+            }
         }
         out.push([line, color]);
     }
     return out;
 }
 
+function drawLines(g: G, rows: [string, string][], x: number, y: number, px: number) {
+    for (const [s, color] of rows) {
+        text(g, s, x, y, px, color);
+        y += px * LINE_H;
+    }
+}
+
 /** Rows of small text from the top of a box, each wrapped at spaces to the box width (the caller clips). */
 export function lines(g: G, rows: [string, string][], b: Box, scale: number, base = 9): void {
     const px = fontPx(base, scale);
-    let y = b.y;
-    for (const [s, color] of wrapped(g, rows, b.w, px)) {
-        text(g, s, b.x, y, px, color);
-        y += px * LINE_H;
-    }
+    drawLines(g, wrapped(g, rows, b.w, px), b.x, b.y, px);
 }
 
 /** The height lines() fills with these rows in a box `w` wide. */
@@ -70,20 +96,65 @@ export function clippedLines(g: G, rows: [string, string][], b: Box, scale: numb
     g.restore();
 }
 
+/** clippedLines() that never loses the last row (a LIVE/SIMULATED badge): when they don't all fit,
+ *  the rows above it give way, whole lines at a time, and it follows the ones that still fit. */
+export function linesKeepLast(g: G, rows: [string, string][], b: Box, scale: number, base = 9): void {
+    const px = fontPx(base, scale);
+    const top = wrapped(g, rows.slice(0, -1), b.w, px), last = wrapped(g, rows.slice(-1), b.w, px);
+    g.save();
+    if ((top.length + last.length) * px * LINE_H <= b.h) {
+        clipTo(g, b);
+        drawLines(g, [...top, ...last], b.x, b.y, px);
+    } else {
+        const lineH = px * LINE_H, lastH = Math.min(b.h, last.length * px * LINE_H);
+        const rowsH = Math.floor((b.h - lastH) / lineH) * lineH;
+        clipTo(g, { ...b, h: rowsH });
+        drawLines(g, top, b.x, b.y, px);
+        g.restore();
+        g.save();
+        clipTo(g, { ...b, y: b.y + rowsH, h: lastH });
+        drawLines(g, last, b.x, b.y + rowsH, px);
+    }
+    g.restore();
+}
+
+/** `s` cut to `maxW` with an ellipsis, in the font at `px` (which it sets): the longest prefix that
+ *  fits with it, found by halving, since a longer prefix is never narrower. */
+function fit(g: G, s: string, maxW: number, px: number): string {
+    g.font = `${px}px ${MONO}`;
+    if (g.measureText(s).width <= maxW) return s;
+    let lo = 1, hi = s.length; // `hi` never fits; `lo` fits, or is 1 when no prefix of two or more does
+    while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (g.measureText(`${s.slice(0, mid)}…`).width <= maxW) lo = mid;
+        else hi = mid;
+    }
+    return lo > 1 ? `${s.slice(0, lo)}…` : '';
+}
+
 /** A tag's size around this label; sets the font. */
 export function tagSize(g: G, s: string, px: number): { w: number; h: number } {
     g.font = `${px}px ${MONO}`;
     return { w: g.measureText(s).width + px * 0.8, h: px * 1.5 };
 }
 
+/** The box a tag of this size covers, centred on (x, y). */
+export const tagBox = (x: number, y: number, { w, h }: { w: number; h: number }): Box => ({ x: x - w / 2, y: y - h / 2, w, h });
+
 /** A small label on a black ground, so it reads on top of lines and frames. */
 export function tag(g: G, s: string, x: number, y: number, px: number, color: string): Box {
-    const { w, h } = tagSize(g, s, px);
-    const b = { x: x - w / 2, y: y - h / 2, w, h };
+    const b = tagBox(x, y, tagSize(g, s, px));
     g.fillStyle = '#000';
     g.fillRect(b.x, b.y, b.w, b.h);
     text(g, s, x, y - px / 2, px, color, 'center');
     return b;
+}
+
+export function disc(g: G, x: number, y: number, r: number, color: string): void {
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(x, y, r, 0, TAU);
+    g.fill();
 }
 
 export const overlaps = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;

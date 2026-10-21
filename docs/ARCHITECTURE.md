@@ -58,7 +58,8 @@ data/organoid_firing.f16, vessel.gcode, ─┤          (src/show/routing/live.t
 
 **Rules** live in `src/show/routing/`. They're pure, Node-tested modules with explicit `.ts` imports:
 - `facts.ts`: every number and label shown, from the running system: the 11.3 scene, the G-code, the bridge.
-- `layout.ts`: boxes from the area's size, landscape at w/h ≥ 1.1, else portrait; type scale.
+- `layout.ts`: boxes from the area's size, landscape at w/h ≥ 1.1, else portrait; type scale. It also leaves a channel around the organoid (0.28 of its radius) and computes the overview's cables there, once per size.
+- `cables.ts`: the overview's cables as cubic Béziers. Each leaves the rim radially, spread round toward the open space beside the cards, and meets the middle of the card edge that faces the organoid, square to it. It also shapes Max's short lead to the solenoids, which bows out on that side.
 - `firingBlob.ts`: EoC's `TFR1` half-float blob of normalized rates, one row per index.
 - `soundFeatures.ts`: population rate, burst ends, the VISAP mappings (the SOUND fallback without the patch's data).
 - `wav.ts`: the patch's data buffers (16-bit PCM mono, one sample per index).
@@ -91,7 +92,7 @@ data/organoid_firing.f16, vessel.gcode, ─┤          (src/show/routing/live.t
 
 Drawing lives in `src/components/routing/`:
 
-- `glyphs.ts`, `overview.ts`, `details.ts`;
+- `glyphs.ts`, `overview.ts`, `details.ts`. Text wraps at spaces and hard-breaks a word wider than its box. `fit` shortens a title with an ellipsis. `linesKeepLast` keeps a card's LIVE / SIMULATED / ≈ badge in view when its rows overflow, and a card's text area is sized from its wrapped rows. That area, like a detail's chain cells, only grows while a layout stands, so live values that rewrap don't resize anything from frame to frame. Tags stay on the canvas, off the organoid's title, and outside its outline where they can;
 - `soundGlyphs.ts`: the activity strip, chord strip, score, rule charts, harmony and speakers;
 - `armGlyphs.ts`: the arms as built (pod, spine through its vertebrae, leaves, tendon, touch-lit fibres, the tip's sensor cone with the visitor) and the distance → angle rule chart.
 - `artifactGlyphs.ts`: slice stacks on a turntable, the print-preview plan view, and the schematic. The stacks render into offscreen canvases at most every 100 ms (`ArtifactCache`, owned by RoutingView).

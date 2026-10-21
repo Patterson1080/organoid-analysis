@@ -36,6 +36,16 @@ test('portrait stacks them above and below', () => {
     for (const k of AUDIO_COMPUTER) assert.ok(l.cards[k].y >= l.centre.cy + l.centre.r, `${k} below the centre`);
 });
 
+test('the cards leave the cables a channel around the organoid', () => {
+    for (const [w, h] of [[1600, 900], [1440, 860], [900, 1600]]) {
+        const { cards, centre: { cx, cy, r } } = routingLayout(w, h);
+        for (const k of MEDIA) {
+            const b = cards[k], nx = Math.min(Math.max(cx, b.x), b.x + b.w), ny = Math.min(Math.max(cy, b.y), b.y + b.h);
+            assert.ok(Math.hypot(nx - cx, ny - cy) - r >= 0.2 * r, `${k} at ${w}×${h} sits ${(Math.hypot(nx - cx, ny - cy) - r).toFixed(1)} from the rim`);
+        }
+    }
+});
+
 test('orientation switches at w/h 1.1', () => {
     assert.equal(routingLayout(1100, 1000).orientation, 'landscape');
     assert.equal(routingLayout(1090, 1000).orientation, 'portrait');

@@ -139,7 +139,7 @@ export function RoutingView(props: RoutingViewProps) {
     useEffect(() => {
         const el = canvasRef.current;
         if (!el) return;
-        const io = new IntersectionObserver(([entry]) => { visibleRef.current = entry.isIntersecting; });
+        const io = new IntersectionObserver(entries => { visibleRef.current = entries[entries.length - 1].isIntersecting; }); // the newest of a batch
         io.observe(el);
         return () => io.disconnect();
     }, [shown]);
@@ -344,6 +344,8 @@ export function RoutingView(props: RoutingViewProps) {
             {shown && (
                 <canvas
                     ref={canvasRef}
+                    role="img"
+                    aria-label="Routing view: the organoid recording's /index goes to the visuals, sound, solenoids and LEDs; visitors move the robot arms, which feed the sound; the artifacts were grown from this recording before the show"
                     style={{ display: 'block', touchAction: 'manipulation' }}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}

@@ -10,7 +10,7 @@ import type { StackSlice } from '../../show/routing/sliceView';
 import type { TermiteSlices } from '../../show/routing/termiteSlices';
 import { printedLayers } from '../../show/routing/vessel';
 import type { Vessel } from '../../show/routing/vessel';
-import { frame, lines, text } from './glyphs';
+import { frame, lines, linesHeight, text } from './glyphs';
 import type { G } from './glyphs';
 
 export const TURN_MS = 48_000;
@@ -169,7 +169,11 @@ export function planView(g: G, b: Box, slice: StackSlice, f: StackFrame, rgb: st
 export function schematic(g: G, b: Box, ledShare: number, s: number): void {
     if (b.w < 40 || b.h < 40) return;
     const px = fontPx(8, s);
-    const f: Box = { x: b.x + b.w * 0.12, y: b.y + px * 1.8, w: b.w * 0.76, h: b.h - px * 4.2 };
+    // The caption as it wraps (a line at least), so it stays inside the box.
+    const caption: [string, string][] = [['schematic: the two pieces at their real heights, the frame and fibres not to scale', '#777']];
+    const capH = Math.max(px * 1.5, linesHeight(g, caption, b.w, s, 8));
+    const f: Box = { x: b.x + b.w * 0.12, y: b.y + px * 1.8, w: b.w * 0.76, h: b.h - px * 2.7 - capH };
+    if (f.h <= 0) return;
     frame(g, f, '#777');
     text(g, 'laser-cut frame', f.x, b.y, px, '#999');
     // the two matrices along the top bar
@@ -232,5 +236,5 @@ export function schematic(g: G, b: Box, ledShare: number, s: number): void {
     g.stroke();
     text(g, 'vessel', vx, floor + 2 * s, px, '#999', 'center');
     text(g, 'termite form', tx, floor + 2 * s, px, '#999', 'center');
-    lines(g, [['schematic: the two pieces at their real heights, the frame and fibres not to scale', '#666']], { x: b.x, y: b.y + b.h - px * 1.5, w: b.w, h: px * 1.5 }, s, 8);
+    lines(g, caption, { x: b.x, y: b.y + b.h - capH, w: b.w, h: capH }, s, 8);
 }
