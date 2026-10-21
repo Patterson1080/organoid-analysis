@@ -3,6 +3,7 @@
 
 import type { Box } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
+import { LED_COLOR } from '../../show/routing/live';
 import type { LiveNeuron } from '../../show/routing/live';
 import type { Swarm } from '../../show/routing/swarm';
 import type { Vessel } from '../../show/routing/vessel';
@@ -10,6 +11,7 @@ import type { Vessel } from '../../show/routing/vessel';
 export type G = CanvasRenderingContext2D;
 export const MONO = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 const TAU = Math.PI * 2;
+export const LINE_H = 1.45; // a lines() row, in font heights
 
 export function text(g: G, s: string, x: number, y: number, px: number, color: string, align: CanvasTextAlign = 'left'): void {
     g.font = `${px}px ${MONO}`;
@@ -19,34 +21,51 @@ export function text(g: G, s: string, x: number, y: number, px: number, color: s
     g.fillText(s, x, y);
 }
 
-/** Rows of small text from the top of a box, each wrapped at spaces to the box width (the caller
- *  clips). Returns the y below them. */
-export function lines(g: G, rows: [string, string][], b: Box, scale: number, base = 9): number {
+/** Rows of small text from the top of a box, each wrapped at spaces to the box width (the caller clips). */
+export function lines(g: G, rows: [string, string][], b: Box, scale: number, base = 9): void {
     const px = fontPx(base, scale);
     g.font = `${px}px ${MONO}`;
     let y = b.y;
     for (const [s, color] of rows) {
+        const whole = s.replace(/^ +/, ''); // the wrap below drops leading spaces too
+        if (g.measureText(whole).width <= b.w) { // most rows fit: one measure, not one per word
+            text(g, whole, b.x, y, px, color);
+            y += px * LINE_H;
+            continue;
+        }
         let line = '';
         for (const word of s.split(' ')) {
             const next = line ? `${line} ${word}` : word;
             if (line && g.measureText(next).width > b.w) {
                 text(g, line, b.x, y, px, color);
-                y += px * 1.45;
+                y += px * LINE_H;
                 line = word;
             } else {
                 line = next;
             }
         }
         text(g, line, b.x, y, px, color);
-        y += px * 1.45;
+        y += px * LINE_H;
     }
-    return y;
+}
+
+/** lines(), clipped to `clip` (the text box unless given). */
+export function clippedLines(g: G, rows: [string, string][], b: Box, scale: number, base = 9, clip: Box = b): void {
+    g.save();
+    clipTo(g, clip);
+    lines(g, rows, b, scale, base);
+    g.restore();
+}
+
+/** A tag's size around this label; sets the font. */
+export function tagSize(g: G, s: string, px: number): { w: number; h: number } {
+    g.font = `${px}px ${MONO}`;
+    return { w: g.measureText(s).width + px * 0.8, h: px * 1.5 };
 }
 
 /** A small label on a black ground, so it reads on top of lines and frames. */
 export function tag(g: G, s: string, x: number, y: number, px: number, color: string): Box {
-    g.font = `${px}px ${MONO}`;
-    const w = g.measureText(s).width + px * 0.8, h = px * 1.5;
+    const { w, h } = tagSize(g, s, px);
     const b = { x: x - w / 2, y: y - h / 2, w, h };
     g.fillStyle = '#000';
     g.fillRect(b.x, b.y, b.w, b.h);
@@ -90,7 +109,7 @@ export function neuronMap(g: G, b: Box, neurons: LiveNeuron[], glow: Float32Arra
     for (let i = 0; i < neurons.length; i++) {
         const n = neurons[i];
         if (only === 'backbone' && !n.backbone) continue;
-        const px = sq.x + n.x * sq.w, py = sq.y + n.y * sq.h, e = glow[i] ?? 0;
+        const px = sq.x + n.x * sq.w, py = sq.y + n.y * sq.h, e = glow[i];
         if (e > 0.06) {
             g.fillStyle = `rgba(255,255,255,${0.4 + 0.6 * e})`;
             g.fillRect(px - dot * 0.75, py - dot * 0.75, dot * 1.5, dot * 1.5);
@@ -121,13 +140,13 @@ export function paintSwarm(canvas: HTMLCanvasElement, s: Swarm, firing: Float32A
     const dot = Math.max(1, size / 280);
     const n = s.nh.length;
     g.fillStyle = style.dim;
-    for (let i = 0; i < s.count; i++) if (!((firing[i % n] ?? 0) >= threshold)) g.fillRect(s.x[i] * size, s.y[i] * size, dot, dot);
+    for (let i = 0; i < s.count; i++) if (!(firing[i % n] >= threshold)) g.fillRect(s.x[i] * size, s.y[i] * size, dot, dot);
     // Firing agents in three brightness bands of their neuron's value (graded like EoC's trails).
     const bands: [number, number, string][] = [[threshold, 0.3, 'rgba(255,255,255,0.55)'], [0.3, 0.6, 'rgba(255,255,255,0.8)'], [0.6, Infinity, '#fff']];
     for (const [lo, hi, color] of bands) {
         g.fillStyle = color;
         for (let i = 0; i < s.count; i++) {
-            const v = firing[i % n] ?? 0;
+            const v = firing[i % n];
             if (v >= lo && v < hi) g.fillRect(s.x[i] * size - dot * 0.4, s.y[i] * size - dot * 0.4, dot * 1.8, dot * 1.8);
         }
     }
@@ -174,8 +193,10 @@ export function strikers(g: G, b: Box, glow: Float32Array): void {
     }
 }
 
-// DualLED_Currents.ino's palette, by the codes in live.ts's LED_COLOR.
-const LED_RGB: Record<number, string> = { 1: '50,255,255', 3: '255,50,50', 4: '255,50,255', 5: '50,50,255' };
+// DualLED_Currents.ino's palette.
+const LED_RGB: Record<number, string> = {
+    [LED_COLOR.cyan]: '50,255,255', [LED_COLOR.red]: '255,50,50', [LED_COLOR.purple]: '255,50,255', [LED_COLOR.blue]: '50,50,255',
+};
 
 /** A 16 × 16 matrix as the sketch lights it: a white baseline (dimmer while frames arrive,
  *  brighter when idle), each pixel's color blended over it by its remaining life. */

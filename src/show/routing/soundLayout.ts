@@ -2,16 +2,15 @@
 // pixel column so the whole pass can be drawn every frame.
 
 import type { Box } from './layout.ts';
-import { typeScale } from './layout.ts';
+import { isLandscape, typeScale } from './layout.ts';
 
-const LANDSCAPE = 1.1;
 const PORTRAIT_SHARES = [0.34, 0.22, 0.2, 0.24]; // score, rules, harmony, output
 
 /** Landscape: score over rules on the left (62 %), harmony over output on the right. Portrait: four rows. */
 export function soundPanels(story: Box): { score: Box; rules: Box; harmony: Box; output: Box } {
     const g = 10 * typeScale(story.w, story.h);
     const pos = (n: number) => Math.max(1, n);
-    if (story.w / story.h >= LANDSCAPE) {
+    if (isLandscape(story.w, story.h)) {
         const lw = pos((story.w - g) * 0.62), rw = pos(story.w - g - lw);
         const sh = pos((story.h - g) * 0.55), hh = pos((story.h - g) * 0.45);
         const right = story.x + lw + g;

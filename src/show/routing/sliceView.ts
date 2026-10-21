@@ -1,9 +1,8 @@
 // The FAB card's view of both artifacts as stacks of print layers: the vessel's G-code layers and the
-// termite form's slices in one shape, an orthographic turntable projection, and how densely to
-// draw so the layers stay readable at any size.
+// termite form's slices in one shape, and how densely to draw so the layers stay readable at any size.
 
 import type { Box } from './layout.ts';
-import { typeScale } from './layout.ts';
+import { isLandscape, typeScale } from './layout.ts';
 import type { TermiteSlices } from './termiteSlices.ts';
 import type { Vessel } from './vessel.ts';
 
@@ -27,13 +26,6 @@ export function vesselStack(v: Vessel): StackSlice[] {
 /** The termite form's slices bottom to top; segment k lifts by k·explode, opening the seams. */
 export function termiteStack(t: TermiteSlices, explode: number): StackSlice[] {
     return t.segments.flatMap((seg, k) => seg.slices.map(s => ({ y: s.y + k * explode, lines: s.lines, segment: k })));
-}
-
-/** Orthographic turntable: yaw about the vertical axis, then a camera raised by elev. sy is up. */
-export function project(x: number, y: number, z: number, yaw: number, elev: number): [sx: number, sy: number, depth: number] {
-    const c = Math.cos(yaw), s = Math.sin(yaw);
-    const rx = x * c - z * s, rz = x * s + z * c;
-    return [rx, y * Math.cos(elev) - rz * Math.sin(elev), rz * Math.cos(elev) + y * Math.sin(elev)];
 }
 
 /** Draw every n-th slice, so neighbours stay at least minGapPx apart on screen. */
@@ -73,7 +65,7 @@ export function pairLayout(box: Box, termite: { w: number; h: number } | null, v
 export function fabPanels(story: Box): { form: Box; vessel: Box; schematic: Box } {
     const g = 10 * typeScale(story.w, story.h);
     const pos = (n: number) => Math.max(1, n);
-    if (story.w / story.h >= 1.1) {
+    if (isLandscape(story.w, story.h)) {
         const fw = pos((story.w - g) * 0.55), rx = story.x + fw + g, rw = pos(story.w - fw - g);
         const vh = pos((story.h - g) * 0.62);
         return {

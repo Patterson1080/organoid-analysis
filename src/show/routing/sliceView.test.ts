@@ -1,18 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { depthAlpha, fabPanels, pairLayout, project, sliceStride, termiteStack, vesselStack } from './sliceView.ts';
+import { depthAlpha, fabPanels, pairLayout, sliceStride, termiteStack, vesselStack } from './sliceView.ts';
 import type { Box } from './layout.ts';
 import type { TermiteSlices } from './termiteSlices.ts';
 import type { Vessel } from './vessel.ts';
-
-test('a point on the axis projects to the centre line', () => {
-    assert.equal(project(0, 5, 0, 1.2, 0.2)[0], 0);
-});
-
-test('a quarter turn moves +x into depth', () => {
-    const [sx, sy, depth] = project(1, 0, 0, Math.PI / 2, 0);
-    assert.ok(Math.abs(sx) < 1e-9 && Math.abs(sy) < 1e-9 && Math.abs(depth - 1) < 1e-9);
-});
 
 test('the front gets the higher alpha', () => {
     assert.equal(depthAlpha(10, 10), 1);

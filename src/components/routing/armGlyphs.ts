@@ -5,6 +5,7 @@
 import { ARM_RULES, servoTarget } from '../../show/routing/arms';
 import type { Box } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
+import { armIsLive } from '../../show/routing/live';
 import type { Arm } from '../../show/routing/live';
 import { clipTo, frame, text } from './glyphs';
 import type { G } from './glyphs';
@@ -29,7 +30,7 @@ function spineAngle(th: number[], t: number): number {
 /** One arm hanging from (x, top): spine `len` long, then the sensor cone `cone` long. */
 function drawArm(g: G, x: number, top: number, len: number, cone: number, arm: Arm, s: number, labels: boolean) {
     const podW = 14 * s, podH = 15 * s, n = ARM_RULES.vertebrae, seg = len / n;
-    g.fillStyle = arm.live.servo || arm.live.proximity ? '#e8e8e8' : '#bdbdbd';
+    g.fillStyle = armIsLive(arm) ? '#e8e8e8' : '#bdbdbd';
     g.fillRect(x - podW / 2, top, podW, podH);
     const pts: [number, number, number][] = [[x, top + podH, spineAngle(arm.th, 0)]]; // x, y, angle
     for (let i = 0; i < n; i++) {
@@ -105,7 +106,7 @@ export function armsPanel(g: G, b: Box, arms: Arm[], s: number, opts: { cone: bo
         const x = b.x + (k + 0.38) * (b.w / arms.length); // a little left of centre: the arms curl right
         drawArm(g, x, b.y + 4 * s, len, cone, arm, s, opts.labels);
         if (!opts.labels) return;
-        const tag = arm.live.proximity || arm.live.servo ? 'LIVE' : 'sim';
+        const tag = armIsLive(arm) ? 'LIVE' : 'sim';
         text(g, `arm ${k + 1} · ${armPhaseText(arm)}`, x, b.y + b.h - foot, px, '#ccc', 'center');
         text(g, `${Math.round(arm.cm)} cm · ${tag}`, x, b.y + b.h - foot + px * 1.3, px, arm.live.proximity ? '#fff' : '#777', 'center');
     });
@@ -127,7 +128,7 @@ export function armRuleChart(g: G, b: Box, arms: Arm[], s: number): void {
         const x = X(Math.min(ARM_RULES.rangeCm, arm.cm));
         g.fillStyle = 'rgba(255,255,255,0.08)'; // the deadband the arm sits in
         g.fillRect(plot.x, Y(Math.min(ARM_RULES.servoMax, arm.servo + ARM_RULES.deadbandDeg)), plot.w, (2 * ARM_RULES.deadbandDeg / ARM_RULES.servoMax) * plot.h);
-        g.fillStyle = arm.live.servo || arm.live.proximity ? '#fff' : '#bbb';
+        g.fillStyle = armIsLive(arm) ? '#fff' : '#bbb';
         g.beginPath();
         g.arc(x, Y(arm.servo), 3.5 * s, 0, Math.PI * 2);
         g.fill();

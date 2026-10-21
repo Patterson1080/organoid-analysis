@@ -2,19 +2,20 @@
 // chord its counter is on, the voices it plays (drawn like Max draws them), the rules that pace
 // them, and where each sound lands among the speakers.
 
+import { ARM_RULES } from '../../show/routing/arms';
 import { pad6 } from '../../show/routing/captions';
 import { SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { Box } from '../../show/routing/layout';
-import { fontPx } from '../../show/routing/layout';
+import { fontPx, row } from '../../show/routing/layout';
 import type { Rate, SoundView } from '../../show/routing/live';
-import { NOTE_NAMES, PATCH, chordOf, grainSpeed, grainTickMs, kickMs, toneMs } from '../../show/routing/maxPatch';
+import { NOTE_NAMES, PATCH, chordAt, grainSpeed, grainTickMs, kickMs, toneMs } from '../../show/routing/maxPatch';
 import type { PatchData } from '../../show/routing/maxPatch';
 import { droneLevel, eventsSince } from '../../show/routing/soundEvents';
 import { activityEnvelope, soundCaptions } from '../../show/routing/soundLayout';
-import { clipTo, frame, lines, text } from './glyphs';
+import { LINE_H, clippedLines, frame, text } from './glyphs';
 import type { G } from './glyphs';
 
-export const SCORE_WINDOW_MS = 10_000;
+const SCORE_WINDOW_MS = 10_000;
 const GLOW_MS = 1500;
 const GRAIN_GLOW_MS = 400; // grains come by the dozen a second: a brief, dim flicker each
 const KICK_DECAY_MS = 6000; // termiteKick: 5 ms attack, 6 s decay
@@ -38,7 +39,7 @@ function envelope(p: PatchData, columns: number, range: Range): Float32Array {
     return e;
 }
 
-export const noteNames = (notes: readonly number[]) =>
+const noteNames = (notes: readonly number[]) =>
     [...new Set(notes.map(n => n % 12))].sort((a, b) => a - b).map(pc => NOTE_NAMES[pc]).join(' ');
 
 /** Events a second as printed: Max's own figure when it reports one, tagged LIVE. */
@@ -80,13 +81,10 @@ export function chordStrip(g: G, b: Box, step: number | null, s: number): void {
 
 /** The chord letter, large, with its notes. */
 export function chordName(g: G, b: Box, sv: SoundView, s: number): void {
-    const c = sv.chordStep === null ? null : chordOf(sv.chordStep);
+    const c = chordAt(sv.chordStep);
     const big = Math.max(fontPx(9, s), Math.min(fontPx(30, s), b.h * 0.5)), small = fontPx(8, s);
     text(g, c ? c.name : '?', b.x + b.w / 2, b.y, big, c ? '#fff' : '#555', 'center');
-    g.save();
-    clipTo(g, { ...b, y: b.y + big * 1.05, h: b.h - big * 1.05 });
-    lines(g, [[c ? noteNames(c.notes) : 'chord unknown here', c ? '#bbb' : '#666']], { ...b, y: b.y + big * 1.1, h: b.h }, s, 8);
-    g.restore();
+    clippedLines(g, [[c ? noteNames(c.notes) : 'chord unknown here', c ? '#bbb' : '#666']], { ...b, y: b.y + big * 1.1, h: b.h }, s, 8, { ...b, y: b.y + big * 1.05, h: b.h - big * 1.05 });
     if (sv.chordSource !== 'unknown') text(g, sv.chordSource === 'live' ? 'LIVE' : '≈', b.x + b.w, b.y, small, sv.chordSource === 'live' ? '#fff' : '#777', 'right');
 }
 
@@ -114,7 +112,7 @@ export function score(g: G, b: Box, sv: SoundView, now: number, s: number): void
     const kickBand: Box = { ...lane, y: lane.y + lane.h * 0.84, h: lane.h * 0.16 };
     const rowH = staff.h / 12, rowY = (pc: number) => staff.y + staff.h - (pc + 0.5) * rowH, mid = staff.y + staff.h / 2;
     const xAt = (t: number) => lane.x + lane.w * (1 - (now - t) / SCORE_WINDOW_MS);
-    const chord = sv.chordStep === null ? null : chordOf(sv.chordStep);
+    const chord = chordAt(sv.chordStep);
     const inChord = new Set(chord ? chord.notes.map(n => n % 12) : []);
 
     const rowPx = Math.max(7, Math.min(px, rowH * 0.95));
@@ -157,7 +155,7 @@ export function score(g: G, b: Box, sv: SoundView, now: number, s: number): void
 }
 
 /** An interval table against its driver (0..1 across), log time up the side, the current value marked. */
-export function stepChart(g: G, b: Box, fn: (x: number) => number | null, x: number, [lo, hi]: [number, number], s: number): void {
+function stepChart(g: G, b: Box, fn: (x: number) => number | null, x: number, [lo, hi]: [number, number], s: number): void {
     frame(g, b, '#1e1e1e');
     const y = (ms: number) => b.y + b.h - 2 - ((Math.log(ms) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))) * (b.h - 4);
     g.strokeStyle = '#777';
@@ -183,8 +181,7 @@ export function stepChart(g: G, b: Box, fn: (x: number) => number | null, x: num
 
 /** The three tables that pace the voices, each with where Max is on it now. */
 export function rules(g: G, b: Box, sv: SoundView, s: number): void {
-    const px = fontPx(8, s), capH = px * 1.45 * 3, foot = px * 1.45 * 2 + px * 0.3, gap = 10 * s;
-    const n = 3, w = (b.w - gap * (n - 1)) / n;
+    const px = fontPx(8, s), capH = px * LINE_H * 3, foot = px * LINE_H * 2 + px * 0.3, gap = 10 * s;
     const ms = (v: number | null) => (v === null ? '—' : `${v} ms`);
     const charts: [(x: number) => number | null, number, [number, number], [string, string][]][] = [
         [x => toneMs(x * x), Math.sqrt(sv.a), [PATCH.toneMs[0], PATCH.toneMs[11]], [
@@ -203,18 +200,13 @@ export function rules(g: G, b: Box, sv: SoundView, s: number): void {
             ['half gated silent', '#666'],
         ]],
     ];
+    const cells = row({ ...b, h: b.h - foot }, charts.length, gap);
     charts.forEach(([fn, x, range, caption], i) => {
-        const cell: Box = { x: b.x + i * (w + gap), y: b.y, w, h: b.h - foot };
+        const cell = cells[i];
         stepChart(g, { ...cell, h: Math.max(8, cell.h - capH - 4 * s) }, fn, x, range, s);
-        g.save();
-        clipTo(g, { ...cell, y: cell.y + cell.h - capH, h: capH });
-        lines(g, caption, { ...cell, y: cell.y + cell.h - capH, h: capH }, s, 8);
-        g.restore();
+        clippedLines(g, caption, { ...cell, y: cell.y + cell.h - capH, h: capH }, s, 8);
     });
-    g.save();
-    clipTo(g, { ...b, y: b.y + b.h - foot, h: foot });
-    lines(g, [['grain chance ×(1 − LFO): a 125 s swell of unknown phase, drawn at its midpoint', '#555']], { ...b, y: b.y + b.h - foot + px * 0.3, h: foot }, s, 8);
-    g.restore();
+    clippedLines(g, [['grain chance ×(1 − LFO): a 125 s swell of unknown phase, drawn at its midpoint', '#555']], { ...b, y: b.y + b.h - foot + px * 0.3, h: foot }, s, 8, { ...b, y: b.y + b.h - foot, h: foot });
 }
 
 
@@ -224,7 +216,7 @@ export function harmony(g: G, b: Box, sv: SoundView, index: number | null, mode:
     text(g, 'HARMONY · counter 17', b.x, b.y, px, '#ddd');
     const strip: Box = { x: b.x, y: b.y + px * 1.8, w: b.w, h: Math.min(b.h * 0.3, px * 3) };
     chordStrip(g, strip, sv.chordStep, s);
-    const c = sv.chordStep === null ? null : chordOf(sv.chordStep);
+    const c = chordAt(sv.chordStep);
     const ahead = sv.nextFlag !== null && index !== null ? (sv.nextFlag - index) / VISUAL_FACTS.fps : null;
     const where = mode === 'show'
         ? `flag ${sv.flagsSoFar} / ${sv.passFlags} this pass${sv.nextFlag !== null ? ` · next ${pad6(sv.nextFlag)}${ahead !== null && ahead >= 0 ? ` in ≈ ${Math.round(ahead)} s` : ''}` : ''}`
@@ -233,16 +225,13 @@ export function harmony(g: G, b: Box, sv: SoundView, index: number | null, mode:
         : sv.chordSource === 'computed' ? ['≈ · counted from pass 1, if Max loaded before it', '#888']
         : ['the chord steps on the burst flags Max receives; local playback skips most indices', '#888'];
     const below: Box = { x: b.x, y: strip.y + strip.h + px * 0.8, w: b.w, h: b.y + b.h - (strip.y + strip.h + px * 0.8) };
-    g.save();
-    clipTo(g, below);
-    lines(g, [
+    clippedLines(g, [
         [c ? `chord ${c.name}${c.held ? ' (held)' : ''} · ${noteNames(c.notes)}` : 'chord unknown here', c ? '#fff' : '#777'],
         ['one step per burst flag', '#888'],
         [where, '#aaa'],
         source,
         ['C minor, Phrygian inflections · distorted guitar, a sample per note', '#666'],
-    ], below, s, 9);
-    g.restore();
+    ], below, s);
 }
 
 /** Where each sound lands: 16 positions over speakers 3–4 and 5–6, kicks at a pair's centre, the
@@ -296,23 +285,17 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
     text(g, '1–2', b.x + spk + 2 * s, y3 + (rowH - px) / 2, px, arpGlow > 0.5 ? '#000' : '#ccc', 'center');
     const tag = sv.arm1.live ? 'LIVE' : 'SIMULATED', color = sv.arm1.live ? '#fff' : '#aaa';
     const arpText: [string, string][] = [
-        [`arpeggio · arm 1 at ${Math.round(sv.arm1.cm)} cm${sv.arm1.cm >= 100 ? ' (nobody)' : ''}`, color],
+        [`arpeggio · arm 1 at ${Math.round(sv.arm1.cm)} cm${sv.arm1.cm >= ARM_RULES.rangeCm ? ' (nobody)' : ''}`, color],
         [`${sv.arpMs === null ? 'stopped' : `a note every ${Math.round(sv.arpMs)} ms`} · ${tag}`, color],
     ];
-    g.save();
-    const after: Box = { x: b.x + spk * 2 + 12 * s, y: y3 + (rowH - px * 1.45 * 2) / 2, w: b.w - spk * 2 - 12 * s, h: rowH };
-    clipTo(g, after);
-    lines(g, arpText, after, s, 8);
-    g.restore();
+    const after: Box = { x: b.x + spk * 2 + 12 * s, y: y3 + (rowH - px * LINE_H * 2) / 2, w: b.w - spk * 2 - 12 * s, h: rowH };
+    clippedLines(g, arpText, after, s, 8);
     const foot: Box = { x: b.x, y: y3 + rowH + px * 0.8, w: b.w, h: b.y + b.h - (y3 + rowH + px * 0.8) };
-    g.save();
-    clipTo(g, foot);
-    lines(g, [
+    clippedLines(g, [
         [soundCaptions(true).output, '#777'],
         [`${unrouted} unrouted in 10 s (gate 0)`, '#777'],
         ['arm 1: a note every 15 + 1000·(d/100)² ms, up the chord, C3–C5', '#666'],
         [`patch ${SOUND_FACTS.patchFile}`, '#555'],
         [`arm 1 ${SOUND_FACTS.serialFile}`, '#555'],
     ], foot, s, 8);
-    g.restore();
 }

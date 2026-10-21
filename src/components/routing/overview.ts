@@ -2,25 +2,25 @@
 // the audio computer's group on the other, and the spokes between them.
 
 import { formatClock } from '../../show/showMath';
-import { firingCaption, pad6, strikeCaption } from '../../show/routing/captions';
-import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
+import { firingCaption, indexLabel, robotCaption, strikeCaption } from '../../show/routing/captions';
+import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../../show/routing/facts';
 import type { Box, RoutingLayout } from '../../show/routing/layout';
-import { fontPx } from '../../show/routing/layout';
+import { fontPx, row } from '../../show/routing/layout';
+import { armIsLive, firingCount } from '../../show/routing/live';
 import type { LiveState } from '../../show/routing/live';
 import type { PatchData } from '../../show/routing/maxPatch';
-import type { TermiteSlices } from '../../show/routing/termiteSlices';
-import { printedLayers } from '../../show/routing/vessel';
-import type { Vessel } from '../../show/routing/vessel';
-import { MONO, arrowHead, clipTo, frame, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, text } from './glyphs';
-import { armPhaseText, armsPanel } from './armGlyphs';
-import type { G } from './glyphs';
-import { activityStrip, chordName, chordStrip, rateText } from './soundGlyphs';
-import { CLAY_RGB, TERMITE_RGB, TURN_MS, cachedDraw, drawStack, stackExtent, termiteFrame, termiteLayers, vesselFrame, vesselLayers } from './artifactGlyphs';
 import { pairLayout } from '../../show/routing/sliceView';
+import { SWARM_KEYS } from '../../show/routing/swarm';
+import type { SwarmKey } from '../../show/routing/swarm';
+import type { TermiteSlices } from '../../show/routing/termiteSlices';
+import type { Vessel } from '../../show/routing/vessel';
+import { LINE_H, MONO, arrowHead, clipTo, frame, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, tagSize, text } from './glyphs';
+import type { G } from './glyphs';
+import { armPhaseText, armsPanel } from './armGlyphs';
+import { activityStrip, chordName, chordStrip, rateText } from './soundGlyphs';
+import { grownVessel, stackExtent, termiteFrame, turningTermite, vesselFrame } from './artifactGlyphs';
 import type { ArtifactCache } from './artifactGlyphs';
-
-export type SwarmKey = 'physarum' | 'boids' | 'termites';
 
 export interface DrawInput {
     live: LiveState;
@@ -45,30 +45,17 @@ export interface DrawInput {
 const DASH_FLOW_MS = 18; // dash offset per ms on the /index spokes
 const PULSE_MS = 550;
 
-export const firingCount = (live: LiveState) => {
-    let n = 0;
-    for (let i = 0; i < live.firing.length; i++) if (live.firing[i] >= VISUAL_FACTS.threshold) n++;
-    return n;
-};
-
-
 /** A card's header band and the body below it, split into a glyph area and a text area. */
-export function cardParts(b: Box, scale: number, textRows: number): { glyph: Box; textBox: Box } {
+function cardParts(b: Box, scale: number, textRows: number): { glyph: Box; textBox: Box } {
     const pad = 8 * scale, head = fontPx(11, scale) + 9 * scale;
     const body: Box = { x: b.x + pad, y: b.y + head, w: b.w - 2 * pad, h: b.h - head - pad };
-    const textH = textRows * fontPx(9, scale) * 1.45;
+    const textH = textRows * fontPx(9, scale) * LINE_H;
     if (body.w / Math.max(1, body.h) >= 1.9) {
         const gw = body.w * 0.56;
         return { glyph: { x: body.x, y: body.y, w: gw, h: body.h }, textBox: { x: body.x + gw + pad, y: body.y, w: body.w - gw - pad, h: body.h } };
     }
     const gh = Math.max(0, body.h - textH - pad / 2);
     return { glyph: { x: body.x, y: body.y, w: body.w, h: gh }, textBox: { x: body.x, y: body.y + gh + pad / 2, w: body.w, h: textH } };
-}
-
-/** Split a box into `n` equal boxes side by side with `gap` between them. */
-export function row(b: Box, n: number, gap: number): Box[] {
-    const w = (b.w - gap * (n - 1)) / n;
-    return Array.from({ length: n }, (_, i) => ({ x: b.x + i * (w + gap), y: b.y, w, h: b.h }));
 }
 
 function cardHead(g: G, b: Box, key: MediumKey, hover: boolean, scale: number) {
@@ -89,9 +76,11 @@ function anchor(b: Box, cx: number, cy: number): [number, number] {
     return [Math.min(Math.max(cx, b.x), b.x + b.w), Math.min(Math.max(cy, b.y), b.y + b.h)];
 }
 
+type Segment = { sx: number; sy: number; ax: number; ay: number };
+
 /** A spoke from the organoid to a card. `/index` streams flow as moving dashes only while the
  *  playhead advances, since nothing is sent otherwise. */
-function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offline', now: number, flowing = true): { sx: number; sy: number; ax: number; ay: number } {
+function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offline', now: number, flowing = true): Segment {
     const { cx, cy, r } = l.centre;
     const [ax, ay] = anchor(b, cx, cy);
     const a = Math.atan2(ay - cy, ax - cx);
@@ -113,15 +102,11 @@ function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offli
     return { sx, sy, ax, ay };
 }
 
-type Segment = { sx: number; sy: number; ax: number; ay: number };
-
 /** A protocol tag on a spoke, drawn after the cards: at the middle of the spoke, or slid toward
  *  (and just inside) the circle until it clears every card and every tag already placed, which
  *  it joins. */
 function spokeTag(g: G, s: Segment, label: string, avoid: Box[], scale: number, color = '#888') {
-    const px = fontPx(8, scale);
-    g.font = `${px}px ${MONO}`;
-    const w = g.measureText(label).width + px * 0.8, h = px * 1.5;
+    const px = fontPx(8, scale), { w, h } = tagSize(g, label, px);
     const at = (t: number) => ({ x: s.sx + (s.ax - s.sx) * t, y: s.sy + (s.ay - s.sy) * t });
     const clear = (p: { x: number; y: number }) => !avoid.some(c => overlaps({ x: p.x - w / 2, y: p.y - h / 2, w, h }, c));
     const spot = [0.5, 0.3, 0.1, -0.15, -0.35, -0.55].map(at).find(clear) ?? at(-0.35);
@@ -136,7 +121,7 @@ function fit(g: G, s: string, maxW: number): string {
     return out.length > 1 ? `${out}…` : '';
 }
 
-function pulse(g: G, s: { sx: number; sy: number; ax: number; ay: number }, t: number, scale: number) {
+function pulse(g: G, s: Segment, t: number, scale: number) {
     if (t < 0 || t > 1) return;
     const d = 3 * scale;
     g.fillStyle = `rgba(255,255,255,${1 - t * 0.6})`;
@@ -161,7 +146,7 @@ function drawCentre(g: G, l: RoutingLayout, v: DrawInput) {
         text(g, `■ OFF · ON IN ${formatClock(v.offRemainingMs)}`, cx, y, fontPx(12, s), '#fff', 'center');
         g.restore();
     } else {
-        text(g, `/index ${v.index === null ? '——————' : pad6(v.index)}`, cx, y, fontPx(13, s), '#fff', 'center');
+        text(g, indexLabel(v.index), cx, y, fontPx(13, s), '#fff', 'center');
     }
     y += fontPx(13, s) * 1.35;
     text(g, v.mode === 'show' ? `show clock · ${VISUAL_FACTS.fps}/s` : 'local playback', cx, y, fontPx(8, s), '#777', 'center');
@@ -171,15 +156,15 @@ function drawCentre(g: G, l: RoutingLayout, v: DrawInput) {
 
 function drawVisual(g: G, b: Box, v: DrawInput) {
     const s = v.scale, { glyph, textBox } = cardParts(b, s, 3);
-    const keys: SwarmKey[] = ['physarum', 'boids', 'termites'];
     row(glyph, 3, 6 * s).forEach((cell, i) => {
         const labelH = fontPx(8, s) * 1.4;
-        swarmPanel(g, { ...cell, h: cell.h - labelH }, v.swarms[keys[i]]);
-        const sw = VISUAL_FACTS.swarms[keys[i]];
+        swarmPanel(g, { ...cell, h: cell.h - labelH }, v.swarms[SWARM_KEYS[i]]);
+        const sw = VISUAL_FACTS.swarms[SWARM_KEYS[i]];
         text(g, `${sw.label} ${sw.agents}`, cell.x + cell.w / 2, cell.y + cell.h - labelH + 2 * s, fontPx(8, s), '#bbb', 'center');
     });
     const firingLine: [string, string] = [firingCaption(v.live.firingSource, v.live.neurons.length, firingCount(v.live)), '#bbb'];
-    lines(g, [firingLine, ['firing → speed ×2 / ×1.5 / ×2 · deposit', '#888'], ['termite firing → Dispersal → others flee', '#888']], textBox, s);
+    const speeds = SWARM_KEYS.map(k => `×${VISUAL_FACTS.swarms[k].speedMul}`).join(' / ');
+    lines(g, [firingLine, [`firing → speed ${speeds} · deposit`, '#888'], ['termite firing → Dispersal → others flee', '#888']], textBox, s);
 }
 
 function drawLed(g: G, b: Box, v: DrawInput) {
@@ -196,25 +181,16 @@ function drawFab(g: G, b: Box, v: DrawInput) {
         return;
     }
     // The two pieces as installed: side by side at one scale, turning; the vessel grown to the playhead.
-    const yaw = (v.now / TURN_MS) * Math.PI * 2;
     const tf = termite ? termiteFrame(termite, 0) : null, vf = vessel ? vesselFrame(vessel) : null;
     const mmPerUnit = termite ? FAB_FACTS.termite.heightMm / (termite.bounds.maxY - termite.bounds.minY) : 1;
     const te = tf ? stackExtent(tf) : null, ve = vf ? stackExtent(vf) : null;
     const pair = pairLayout({ ...glyph, h: glyph.h - px * 1.6 }, te && { w: te.w * mmPerUnit, h: te.h * mmPerUnit }, ve, 10 * s);
-    if (termite && tf && pair.termite) {
-        cachedDraw(g, v.artifacts, 'card-termite', pair.termite, v.now, '', (cg, box) => {
-            drawStack(cg, box, termiteLayers(termite, 0), tf, { yaw, rgb: TERMITE_RGB, lineWidth: 0.7 });
-        });
+    if (termite && pair.termite) {
+        turningTermite(g, v.artifacts, 'card-termite', pair.termite, termite, v.now, 0.7);
         text(g, `≈ ${FAB_FACTS.termite.heightMm / 10} cm`, pair.termite.x + pair.termite.w / 2, glyph.y + glyph.h - px * 1.3, px, '#999', 'center');
     }
-    if (vessel && vf && pair.vessel) {
-        const printed = printedLayers(vessel, VESSEL_FACTS.printedMm);
-        cachedDraw(g, v.artifacts, 'card-vessel', pair.vessel, v.now, String(v.vesselLayer), (cg, box) => {
-            drawStack(cg, box, vesselLayers(vessel), vf, {
-                yaw, rgb: CLAY_RGB, lineWidth: 0.7, currentIndex: v.vesselLayer, faintFrom: v.vesselLayer + 1,
-                dottedFrom: printed < vessel.layers.length ? printed : undefined,
-            });
-        });
+    if (vessel && pair.vessel) {
+        grownVessel(g, v.artifacts, 'card-vessel', pair.vessel, vessel, v.vesselLayer, v.now, 0.7);
         text(g, `${Math.round(vessel.heightMm)} mm`, pair.vessel.x + pair.vessel.w / 2, glyph.y + glyph.h - px * 1.3, px, '#999', 'center');
     }
     lines(g, [
@@ -261,12 +237,11 @@ function drawSolenoids(g: G, b: Box, v: DrawInput) {
 function drawRobot(g: G, b: Box, v: DrawInput) {
     const s = v.scale, live = v.live, { glyph, textBox } = cardParts(b, s, 4);
     armsPanel(g, glyph, live.arms, s, { cone: true, labels: false });
-    const anyLive = live.arms.some(a => a.live.proximity || a.live.servo);
     lines(g, [
         ['visitor → ultrasonic 0–100 cm → servo 0–180°', '#aaa'],
         [live.arms.map(armPhaseText).join(' · '), '#888'],
         ['arm 1 → Max: the arpeggio\'s pace', '#bbb'],
-        [anyLive ? 'LIVE · from the arms' : ROBOT_FACTS.badge, anyLive ? '#fff' : '#555'],
+        robotCaption(live.arms.some(armIsLive)),
     ], textBox, s);
 }
 

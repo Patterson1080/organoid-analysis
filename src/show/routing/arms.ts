@@ -12,14 +12,14 @@ export const ARM_RULES = {
     settleMs: 100,
     cooldownMs: 2000,
     vertebrae: 8,
-    tendonMmPerDeg: 0.21, // the rebuild's 12 mm pulley: 37.7 mm over 180°
 } as const;
 
-/** Arduino's `map(d, 0, 100, 0, 180)`: the float distance truncates to a long, then integer math.
- *  Out-of-range distances clamp; an unreadable one counts as nobody there. */
+/** Out-of-range distances clamp; an unreadable one counts as nobody there. */
+const readCm = (cm: number) => (Number.isFinite(cm) ? Math.min(ARM_RULES.rangeCm, Math.max(0, cm)) : ARM_RULES.rangeCm);
+
+/** Arduino's `map(d, 0, 100, 0, 180)`: the float distance truncates to a long, then integer math. */
 export function servoTarget(cm: number): number {
-    const d = Number.isFinite(cm) ? Math.min(ARM_RULES.rangeCm, Math.max(0, cm)) : ARM_RULES.rangeCm;
-    return Math.trunc((Math.trunc(d) * ARM_RULES.servoMax) / ARM_RULES.rangeCm);
+    return Math.trunc((Math.trunc(readCm(cm)) * ARM_RULES.servoMax) / ARM_RULES.rangeCm);
 }
 
 export type ArmPhase = 'listening' | 'moving' | 'settling' | 'cooldown';
@@ -38,7 +38,7 @@ export const createArmMotion = (rest: number = ARM_RULES.rest): ArmMotion =>
 /** One step of the firmware's loop for this arm; `cm` is what the sensor would read now. A step
  *  can cross phases: a move that ends early settles in the time left. */
 export function stepArmMotion(m: ArmMotion, cm: number, dtMs: number): void {
-    let dt = Math.max(0, dtMs);
+    let dt = dtMs;
     while (dt > 0) {
         if (m.phase === 'settling' || m.phase === 'cooldown') {
             const used = Math.min(dt, m.phaseLeftMs);
@@ -62,7 +62,7 @@ export function stepArmMotion(m: ArmMotion, cm: number, dtMs: number): void {
             m.phase = 'settling';
             m.phaseLeftMs = ARM_RULES.settleMs;
         } else {
-            m.cm = Number.isFinite(cm) ? Math.min(ARM_RULES.rangeCm, Math.max(0, cm)) : ARM_RULES.rangeCm;
+            m.cm = readCm(cm);
             m.target = servoTarget(m.cm);
             if (Math.abs(m.target - m.pos) <= ARM_RULES.deadbandDeg) return;
             m.phase = 'moving';

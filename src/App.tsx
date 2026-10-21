@@ -21,14 +21,14 @@ import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledF
 import type { LedFrame } from './show/ledFrame';
 import { parseFiringBlob } from './show/routing/firingBlob';
 import type { FiringBlob } from './show/routing/firingBlob';
-import { consumeRoutingOsc, createTelemetry } from './show/routing/telemetry';
-import { parseVesselGcode } from './show/routing/vessel';
 import { patchData } from './show/routing/maxPatch';
 import type { PatchData } from './show/routing/maxPatch';
-import { parseWav16 } from './show/routing/wav';
+import { consumeRoutingOsc, createTelemetry } from './show/routing/telemetry';
 import { parseTermiteSlices } from './show/routing/termiteSlices';
 import type { TermiteSlices } from './show/routing/termiteSlices';
+import { parseVesselGcode } from './show/routing/vessel';
 import type { Vessel } from './show/routing/vessel';
+import { parseWav16 } from './show/routing/wav';
 import { parseNeuronCSV, parseSpikeCSV } from './utils/dataProcessing';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
 

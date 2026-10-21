@@ -2,20 +2,24 @@
 // slices and the clay vessel's G-code spiral, drawn into offscreen canvases a few times a second;
 // and the installation as the parent spec describes it, as a schematic.
 
+import { FAB_FACTS, VESSEL_FACTS } from '../../show/routing/facts';
 import type { Box } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
 import { depthAlpha, sliceStride, termiteStack, vesselStack } from '../../show/routing/sliceView';
 import type { StackSlice } from '../../show/routing/sliceView';
 import type { TermiteSlices } from '../../show/routing/termiteSlices';
+import { printedLayers } from '../../show/routing/vessel';
 import type { Vessel } from '../../show/routing/vessel';
 import { frame, lines, text } from './glyphs';
 import type { G } from './glyphs';
 
 export const TURN_MS = 48_000;
+const turnYaw = (now: number) => (now / TURN_MS) * Math.PI * 2;
 const ELEV = (14 * Math.PI) / 180;
 const RENDER_MS = 100; // at most ten renders a second; the turn moves 0.75° between them
 export const TERMITE_RGB = '214,208,255';
 export const CLAY_RGB = '222,178,140';
+const VESSEL_TO_TERMITE = 451 / FAB_FACTS.termite.heightMm; // the vessel's G-code height against the form's
 
 /** How a stack sits: its footprint radius around (cx, cz) and its height range. */
 export interface StackFrame {
@@ -101,13 +105,13 @@ export interface ArtifactCache {
 }
 export const createArtifactCache = (): ArtifactCache => ({ entries: new Map() });
 
-/** Render into this key's offscreen canvas when it's 100 ms old or its signature changed, then blit. */
-export function cachedDraw(g: G, cache: ArtifactCache, key: string, b: Box, now: number, sig: string, render: (cg: G, local: Box) => void): void {
+/** Render into this key's offscreen canvas when it's maxAgeMs old or its signature changed, then blit. */
+export function cachedDraw(g: G, cache: ArtifactCache, key: string, b: Box, now: number, sig: string, render: (cg: G, local: Box) => void, maxAgeMs = RENDER_MS): void {
     if (b.w < 2 || b.h < 2) return;
     const dpr = g.getTransform().a || 1, w = Math.ceil(b.w * dpr), h = Math.ceil(b.h * dpr);
     let e = cache.entries.get(key);
     if (!e) cache.entries.set(key, (e = { canvas: document.createElement('canvas'), at: -Infinity, sig: '' }));
-    if (now - e.at >= RENDER_MS || e.sig !== sig || e.canvas.width !== w || e.canvas.height !== h) {
+    if (now - e.at >= maxAgeMs || e.sig !== sig || e.canvas.width !== w || e.canvas.height !== h) {
         if (e.canvas.width !== w || e.canvas.height !== h) {
             e.canvas.width = w;
             e.canvas.height = h;
@@ -121,6 +125,24 @@ export function cachedDraw(g: G, cache: ArtifactCache, key: string, b: Box, now:
         e.sig = sig;
     }
     g.drawImage(e.canvas, b.x, b.y, b.w, b.h);
+}
+
+/** The termite form turning once every TURN_MS. */
+export function turningTermite(g: G, cache: ArtifactCache, key: string, b: Box, t: TermiteSlices, now: number, lineWidth: number): void {
+    cachedDraw(g, cache, key, b, now, '', (cg, box) => {
+        drawStack(cg, box, termiteLayers(t, 0), termiteFrame(t, 0), { yaw: turnYaw(now), rgb: TERMITE_RGB, lineWidth });
+    });
+}
+
+/** The vessel turning, grown to `layer`, dotted above where the print stopped. */
+export function grownVessel(g: G, cache: ArtifactCache, key: string, b: Box, vessel: Vessel, layer: number, now: number, lineWidth: number): void {
+    const printed = printedLayers(vessel, VESSEL_FACTS.printedMm);
+    cachedDraw(g, cache, key, b, now, String(layer), (cg, box) => {
+        drawStack(cg, box, vesselLayers(vessel), vesselFrame(vessel), {
+            yaw: turnYaw(now), rgb: CLAY_RGB, lineWidth, currentIndex: layer, faintFrom: layer + 1,
+            dottedFrom: printed < vessel.layers.length ? printed : undefined,
+        });
+    });
 }
 
 /** One slice seen from above, fitted to the box. */
@@ -142,7 +164,7 @@ export function planView(g: G, b: Box, slice: StackSlice, f: StackFrame, rgb: st
 
 /** The installation as the parent spec states it, nothing more: the laser-cut frame holding the vessel,
  *  the termite form and the two LED matrices, fibres carrying the matrices' light into the glassware. */
-export function schematic(g: G, b: Box, ledShare: number, s: number, vesselToTermite = 451 / 700): void {
+export function schematic(g: G, b: Box, ledShare: number, s: number): void {
     if (b.w < 40 || b.h < 40) return;
     const px = fontPx(8, s);
     const f: Box = { x: b.x + b.w * 0.12, y: b.y + px * 1.8, w: b.w * 0.76, h: b.h - px * 4.2 };
@@ -190,7 +212,7 @@ export function schematic(g: G, b: Box, ledShare: number, s: number, vesselToTer
     const floor = f.y + f.h - px * 1.7, art = f.h * 0.28;
     const vx = f.x + f.w * 0.3, tx = f.x + f.w * 0.68;
     g.strokeStyle = `rgb(${CLAY_RGB})`;
-    const vh = art * vesselToTermite; // their real heights, side by side as installed
+    const vh = art * VESSEL_TO_TERMITE; // their real heights, side by side as installed
     g.beginPath(); // the vessel: wider at the top
     g.moveTo(vx - vh * 0.3, floor);
     g.lineTo(vx - vh * 0.37, floor - vh);

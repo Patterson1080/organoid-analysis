@@ -9,7 +9,6 @@ export const PATCH = {
     kickMs: [1200, 1600, 2400, 3200, 6400, 9600], // outlet 4 also wires 4800; 3200 arrives last
     grainMs: [6.25, 12.5, 25, 50, 100, 200],
     grainSourceMs: 400, // a grain plays the sample's first 400 ms over its length
-    lfoHz: 0.007984, // the grain gate's cycle~ (≈125 s)
     kickEchoMs: 1200,
     chords: ['A', 'B', 'A', 'B', 'C', 'D', 'C', 'D', 'E', 'F', 'E', 'F', 'G', 'H', 'I', 'J', 'K'],
     notes: [ // coll notes: semitones from C, step 1 first
@@ -40,11 +39,11 @@ export function grainLenBins(a: number): [number, number] | null {
     return bin === null ? null : [bin, bin * 2];
 }
 
-/** One grain tick's odds: the LFO gate passes when L < random, then `random 100` must reach
- *  10 + 80√a, compared as ints (`[<]` has no float argument, so it truncates). */
+/** One grain tick's odds: the LFO gate (`cycle~ 0.007984`, ≈125 s) passes when L < random, then
+ *  `random 100` must reach 10 + 80√a, compared as ints (`[<]` has no float argument, so it truncates). */
 export function grainChance(a: number, lfo: number): number {
-    const reach = Math.max(0, 100 - Math.max(0, Math.trunc(10 + 80 * Math.sqrt(a))));
-    return ((1 - Math.min(1, Math.max(0, lfo))) * reach) / 100;
+    const reach = Math.max(0, 100 - Math.trunc(10 + 80 * Math.sqrt(a)));
+    return ((1 - lfo) * reach) / 100;
 }
 
 export const grainSpeed = (lenMs: number) => PATCH.grainSourceMs / lenMs;
@@ -65,10 +64,12 @@ export const chordStep = (flags: number) => (((1 + flags) % 18) + 18) % 18;
 
 /** The chord at a counter step; step 0 has no coll key, so K holds. */
 export function chordOf(step: number): { name: string; notes: readonly number[]; held: boolean } {
-    const s = ((Math.round(step) % 18) + 18) % 18;
+    const s = ((step % 18) + 18) % 18;
     const k = s === 0 ? 17 : s;
     return { name: PATCH.chords[k - 1], notes: PATCH.notes[k - 1], held: s === 0 };
 }
+
+export const chordAt = (step: number | null) => (step === null ? null : chordOf(step));
 
 /** Arm 1's distance (cm, the sensor's 0–100) → the arpeggio's note interval; a zero reading stops it. */
 export function arpIntervalMs(cm: number): number | null {
@@ -132,4 +133,4 @@ export const flagsIn = (p: PatchData, start: number, end: number) =>
 
 /** Flags Max has counted by this index of this pass, if it loaded just before pass 1. */
 export const showChordFlags = (p: PatchData, pass: number, start: number, end: number, index: number) =>
-    Math.max(0, pass - 1) * flagsIn(p, start, end) + flagsIn(p, start, index);
+    (pass - 1) * flagsIn(p, start, end) + flagsIn(p, start, index);

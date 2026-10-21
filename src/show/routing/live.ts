@@ -13,7 +13,7 @@ import { BACKBONE_COUNT, LED_FACTS, ROBOT_FACTS, VISUAL_FACTS } from './facts.ts
 import { firingRow } from './firingBlob.ts';
 import type { FiringBlob } from './firingBlob.ts';
 import {
-    PATCH, activityAt, arpIntervalMs, audibleKicks, chordOf, chordStep, flagsIn, grainChance, grainLenBins, grainTickMs, kickMs, nextFlag,
+    PATCH, activityAt, arpIntervalMs, audibleKicks, chordAt, chordStep, flagsIn, grainChance, grainLenBins, grainTickMs, kickMs, nextFlag,
     showChordFlags, toneMs,
 } from './maxPatch.ts';
 import type { PatchData } from './maxPatch.ts';
@@ -21,7 +21,7 @@ import { createSoundSim, stepSoundSim } from './soundEvents.ts';
 import type { SoundSim } from './soundEvents.ts';
 import { BURST_FRACTION, peakRate, populationRate, stepBurst } from './soundFeatures.ts';
 import type { BurstState } from './soundFeatures.ts';
-import { fresh } from './telemetry.ts';
+import { fresh, freshValue } from './telemetry.ts';
 import type { Telemetry } from './telemetry.ts';
 
 export interface LiveNeuron {
@@ -57,7 +57,6 @@ export interface SoundView {
     grainTickMs: number | null;
     grainLen: [number, number] | null;
     grainChance: number; // per tick, at the LFO's midpoint
-    threshold: number; // 10 + 80√a
     passFlags: number;
     flagsSoFar: number;
     nextFlag: number | null;
@@ -74,6 +73,10 @@ export interface Rate {
     live: boolean;
 }
 
+/** Max's own figure when it reports one (LIVE), else the computed one. */
+export const rate = (reported: number | undefined, computed: number): Rate =>
+    reported !== undefined ? { perSec: reported, live: true } : { perSec: computed, live: false };
+
 export interface Arm {
     th: number[]; // the drawing's spine angles from vertical, top to bottom, lagging like a hanging arm
     motion: ArmMotion; // the firmware's rules, run here on the distance it reads
@@ -83,6 +86,9 @@ export interface Arm {
     light: number; // fibre light 0..1; a touch fades it in
     live: { proximity: boolean; servo: boolean; touch: boolean }; // which values came from the arm itself
 }
+
+/** The arm reports its own distance or angle here. */
+export const armIsLive = (a: Arm) => a.live.proximity || a.live.servo;
 
 /** DualLED_Currents.ino's palette numbers; 0 is the white baseline. */
 export const LED_COLOR = { cyan: 1, red: 3, purple: 4, blue: 5 } as const;
@@ -167,7 +173,7 @@ export function createLiveState(neurons: Neuron[], spikes: SpikeEvent[]): LiveSt
         })),
         sound: {
             source: 'fallback', heardIndex: null, v: 0, a: 0, toneMs: null, kickMs: null, held: { tone: false, kick: false },
-            grainTickMs: null, grainLen: null, grainChance: 0, threshold: 10, passFlags: 0, flagsSoFar: 0, nextFlag: null,
+            grainTickMs: null, grainLen: null, grainChance: 0, passFlags: 0, flagsSoFar: 0, nextFlag: null,
             chordStep: null, chordSource: 'unknown', arm1: { cm: ARM_RULES.rangeCm, live: false }, arpMs: null,
             rates: { tones: { perSec: 0, live: false }, grains: { perSec: 0, live: false }, kick: { perSec: 0, live: false } },
             sim: createSoundSim(1),
@@ -189,6 +195,13 @@ function logStrike(s: LiveState, slot: number, t: number) {
 /** Where this frame's spikes start: the last index for a normal forward step, else just before a jump. */
 function sliceAfter(last: number | null, index: number): number {
     return last !== null && index >= last && index - last <= FRAME_SPAN_MS ? last : index - JUMP_SPAN_MS;
+}
+
+/** Neurons at or above the Visual threshold now. */
+export function firingCount(s: LiveState): number {
+    let n = 0;
+    for (let i = 0; i < s.firing.length; i++) if (s.firing[i] >= VISUAL_FACTS.threshold) n++;
+    return n;
 }
 
 export function advanceLive(s: LiveState, input: LiveInput): void {
@@ -244,22 +257,20 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
 
     // The population rate and burst state the patch works from; its own values when it reports them.
     const sound = telemetry?.sound;
-    const liveRate = sound?.rate;
-    if (liveRate && fresh(liveRate, now)) {
-        s.rate = liveRate.value;
+    const liveRate = freshValue(sound?.rate, now);
+    if (liveRate !== null) {
+        s.rate = liveRate;
         s.rateSource = 'live';
     } else {
         s.rate = index === null ? 0 : populationRate(input.spikes, index);
         s.rateSource = 'computed';
     }
-    const liveBurst = sound?.burst && fresh(sound.burst, now) ? sound.burst.value >= 0.5 : null;
-    s.burst = liveBurst === null
-        ? stepBurst(s.burst, s.rate, BURST_FRACTION * s.peak)
-        : { inBurst: liveBurst, ends: s.burst.inBurst && !liveBurst ? s.burst.ends + 1 : s.burst.ends };
+    const liveBurst = freshValue(sound?.burst, now);
+    s.burst = liveBurst === null ? stepBurst(s.burst, s.rate, BURST_FRACTION * s.peak) : stepBurst(s.burst, liveBurst, 0.5);
     s.soundLive = {};
     for (const k of SOUND_LIVE) {
-        const r = sound?.[k];
-        if (r && fresh(r, now)) s.soundLive[k] = r.value;
+        const v = freshValue(sound?.[k], now);
+        if (v !== null) s.soundLive[k] = v;
     }
     s.rateClock += dt;
     while (s.rateClock >= HISTORY_STEP_MS) {
@@ -279,7 +290,7 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
  *  on, arm 1's arpeggio, and its voices played forward while /index flows: without the recording
  *  playing, nothing triggers (the team's word for the room). */
 function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, moving: boolean, input: LiveInput, dt: number) {
-    const { patch, telemetry, now, range } = input;
+    const { patch, now, range } = input;
     if (input.index !== null) sv.heardIndex = input.index;
     const v = patch && sv.heardIndex !== null ? activityAt(patch, sv.heardIndex) : null;
     const i = Math.floor(sv.heardIndex ?? 0);
@@ -294,7 +305,6 @@ function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, 
         sv.grainTickMs = grainTickMs(a) ?? sv.grainTickMs;
         sv.grainLen = grainLenBins(a) ?? sv.grainLen;
         sv.grainChance = grainChance(a, GRAIN_LFO_MID);
-        sv.threshold = 10 + 80 * Math.sqrt(a);
         sv.passFlags = flagsIn(patch, range.start, range.end);
         sv.flagsSoFar = flagsIn(patch, range.start, i);
         const next = nextFlag(patch, i);
@@ -308,9 +318,8 @@ function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, 
 
     // The counter's step: Max's own when it reports it; in the show, counted from the flags Max has
     // been sent since pass 1; in local playback unknown (it sends too few indices to hit a flag).
-    const harmony = telemetry?.sound.harmony;
-    if (harmony && fresh(harmony, now)) {
-        sv.chordStep = Math.min(17, Math.max(0, Math.round(harmony.value)));
+    if (soundLive.harmony !== undefined) {
+        sv.chordStep = Math.min(17, Math.max(0, Math.round(soundLive.harmony)));
         sv.chordSource = 'live';
     } else if (patch && v !== null && input.mode === 'show') {
         sv.chordStep = chordStep(showChordFlags(patch, input.pass, range.start, range.end, i));
@@ -321,8 +330,6 @@ function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, 
     }
 
     // Events a second as the patch's rules give them, unless Max reports its own.
-    const rate = (reported: number | undefined, computed: number): Rate =>
-        reported !== undefined ? { perSec: reported, live: true } : { perSec: computed, live: false };
     sv.rates = {
         tones: rate(soundLive.tones, sv.toneMs ? 1000 / sv.toneMs : 0),
         grains: rate(soundLive.grains, sv.grainTickMs ? (1000 / sv.grainTickMs) * sv.grainChance : 0),
@@ -334,7 +341,7 @@ function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, 
 
     if (!moving) return;
     stepSoundSim(sv.sim, {
-        now, dtMs: dt, notes: sv.chordStep === null ? null : chordOf(sv.chordStep).notes,
+        now, dtMs: dt, notes: chordAt(sv.chordStep)?.notes ?? null,
         toneMs: sv.toneMs, kickMs: sv.kickMs, grainTickMs: sv.grainTickMs, grainChance: sv.grainChance, grainLen: sv.grainLen, arpMs: sv.arpMs,
     });
 }
@@ -379,9 +386,9 @@ function stepArms(s: LiveState, telemetry: Telemetry | null, now: number, dt: nu
     const ease = (rate: number) => 1 - Math.exp(-(dt / 1000) * rate);
     s.arms.forEach((arm, k) => {
         const t = telemetry?.robot[k];
-        const cm = t?.proximity && fresh(t.proximity, now) ? t.proximity.value : null;
-        const servo = t?.servo && fresh(t.servo, now) ? t.servo.value : null;
-        const touch = t?.touch && fresh(t.touch, now) ? t.touch.value >= 0.5 : null;
+        const cm = freshValue(t?.proximity, now);
+        const servo = freshValue(t?.servo, now);
+        const touchValue = freshValue(t?.touch, now), touch = touchValue === null ? null : touchValue >= 0.5;
         arm.live = { proximity: cm !== null, servo: servo !== null, touch: touch !== null };
         stepArmMotion(arm.motion, cm ?? visitorCm(k, now), dt);
         arm.cm = cm ?? arm.motion.cm;

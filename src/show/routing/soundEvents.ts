@@ -32,7 +32,6 @@ export interface SoundSim {
     drones: DroneVoice[];
     ring: SoundEvent[];
     head: number;
-    count: number;
 }
 
 export interface SimInput {
@@ -48,7 +47,7 @@ export interface SimInput {
 }
 
 export const EVENT_CAP = 4096;
-export const MAX_STEP_MS = 100; // a long frame (hidden tab) advances like one slow frame
+const MAX_STEP_MS = 100; // a long frame (hidden tab) advances like one slow frame
 const DRONES = 6;
 const POSITIONS = 17; // `random 17 → gate~ 16`: 0 closes the gate
 const DRONE_GAP_MS = 1000; // fzero~ listens for a second before the sine takes the pitch
@@ -64,17 +63,20 @@ function rand(sim: SoundSim): number {
 }
 const randInt = (sim: SoundSim, n: number) => Math.floor(rand(sim) * n);
 
+/** A note of the chord, as a pitch class; −1 when the chord isn't known here. */
+const pickPc = (sim: SoundSim, notes: readonly number[] | null) => (notes ? notes[randInt(sim, notes.length)] % 12 : -1);
+
 function newDroneCycle(sim: SoundSim, v: DroneVoice, start: number, notes: readonly number[] | null) {
     v.start = start;
     v.T = 5000 + rand(sim) * 5000;
-    v.pc = notes ? notes[randInt(sim, notes.length)] % 12 : -1;
+    v.pc = pickPc(sim, notes);
     v.position = randInt(sim, POSITIONS);
 }
 
 export function createSoundSim(seed = 1, now = 0): SoundSim {
     const sim: SoundSim = {
         rng: seed | 0, toneClock: 0, grainClock: 0, kickClock: 0, arpClock: 0, arpStep: 0,
-        kickDelays: [null, null, null], drones: [], ring: [], head: 0, count: 0,
+        kickDelays: [null, null, null], drones: [], ring: [], head: 0,
     };
     for (let i = 0; i < DRONES; i++) {
         const v: DroneVoice = { pc: -1, start: now, T: 5000, position: 0 };
@@ -98,11 +100,10 @@ export function droneLevel(v: DroneVoice, now: number): number {
     return x * x;
 }
 
+/** Until the ring fills, head is its length, so this appends. */
 function push(sim: SoundSim, e: SoundEvent) {
-    if (sim.ring.length < EVENT_CAP) sim.ring.push(e);
-    else sim.ring[sim.head] = e;
+    sim.ring[sim.head] = e;
     sim.head = (sim.head + 1) % EVENT_CAP;
-    sim.count = Math.min(EVENT_CAP, sim.count + 1);
 }
 
 const event = (kind: SoundEvent['kind'], at: number, over: Partial<SoundEvent>): SoundEvent =>
@@ -153,12 +154,11 @@ function stepKicks(sim: SoundSim, ticks: number[], now: number) {
 
 export function stepSoundSim(sim: SoundSim, input: SimInput): void {
     const { now, notes } = input;
-    const dt = Math.max(0, Math.min(input.dtMs, MAX_STEP_MS));
-    const pitch = () => (notes ? notes[randInt(sim, notes.length)] % 12 : -1);
+    const dt = Math.min(input.dtMs, MAX_STEP_MS);
 
     const tones: number[] = [];
     sim.toneClock = metro(sim.toneClock, input.toneMs, dt, now, tones);
-    for (const at of tones) push(sim, event('tone', at, { pc: pitch(), position: randInt(sim, POSITIONS) }));
+    for (const at of tones) push(sim, event('tone', at, { pc: pickPc(sim, notes), position: randInt(sim, POSITIONS) }));
 
     const grains: number[] = [];
     sim.grainClock = metro(sim.grainClock, input.grainTickMs, dt, now, grains);
@@ -167,7 +167,7 @@ export function stepSoundSim(sim: SoundSim, input: SimInput): void {
         for (const at of grains) {
             if (rand(sim) >= input.grainChance) continue;
             const lenMs = len[randInt(sim, 2)];
-            push(sim, event('grain', at, { pc: pitch(), position: randInt(sim, POSITIONS), speed: grainSpeed(lenMs) }));
+            push(sim, event('grain', at, { pc: pickPc(sim, notes), position: randInt(sim, POSITIONS), speed: grainSpeed(lenMs) }));
         }
     }
 
@@ -185,15 +185,15 @@ export function stepSoundSim(sim: SoundSim, input: SimInput): void {
 
     for (const v of sim.drones) {
         if (now >= v.start + 3 * v.T + DRONE_GAP_MS) newDroneCycle(sim, v, now, notes);
-        else if (v.pc < 0 && notes) v.pc = notes[randInt(sim, notes.length)] % 12;
+        else if (v.pc < 0 && notes) v.pc = pickPc(sim, notes);
     }
 }
 
 /** Events at or after `since`, oldest first. */
 export function eventsSince(sim: SoundSim, since: number): SoundEvent[] {
     const out: SoundEvent[] = [];
-    const first = sim.count < EVENT_CAP ? 0 : sim.head;
-    for (let i = 0; i < sim.count; i++) {
+    const first = sim.ring.length < EVENT_CAP ? 0 : sim.head;
+    for (let i = 0; i < sim.ring.length; i++) {
         const e = sim.ring[(first + i) % EVENT_CAP];
         if (e.at >= since) out.push(e);
     }

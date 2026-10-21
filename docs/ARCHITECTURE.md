@@ -68,7 +68,7 @@ data/organoid_firing.f16, vessel.gcode, ─┤          (src/show/routing/live.t
 - `soundEvents.ts`: the voices played forward in wall-clock time, at the patch's rates and odds, with a seeded generator. Covers tones, grains, kicks through Max's three echo `delay`s and its half-closed output gate, 6 drones and the arpeggio, into a 4096-event ring.
 - `soundLayout.ts`: the SOUND detail's panels; the activity envelope per pixel column.
 - `slicer.ts` · `termiteSlices.ts`: mesh → horizontal contours (chained, RDP-simplified) → `TSL1`, per print segment. `scripts/termite-slices.mjs` runs them on the OBJ.
-- `sliceView.ts`: both artifacts as layer stacks (vessel layers, termite slices with exploded segments), the turntable projection, slice stride and depth alpha, the FAB panels, and the pair layout that stands them side by side at one scale.
+- `sliceView.ts`: both artifacts as layer stacks (vessel layers, termite slices with exploded segments), slice stride and depth alpha, the FAB panels, and the pair layout that stands them side by side at one scale.
 - `vessel.ts`: G-code → layers centred on the axis; layer ≈ linear in the index; printed cut-off.
 - `tour.ts`: 20 s stops, 60 s idle resume.
 - `telemetry.ts`: the `/routing/*` contract and freshness.
@@ -93,7 +93,7 @@ Drawing lives in `src/components/routing/`:
 - `glyphs.ts`, `overview.ts`, `details.ts`;
 - `soundGlyphs.ts`: the activity strip, chord strip, score, rule charts, harmony and speakers;
 - `armGlyphs.ts`: the arms as built (pod, spine through its vertebrae, leaves, tendon, touch-lit fibres, the tip's sensor cone with the visitor) and the distance → angle rule chart.
-- `artifactGlyphs.ts`: slice stacks, the print-preview plan view, and the schematic. The stacks render into offscreen canvases at most every 100 ms (`ArtifactCache`, owned by RoutingView).
+- `artifactGlyphs.ts`: slice stacks on a turntable, the print-preview plan view, and the schematic. The stacks render into offscreen canvases at most every 100 ms (`ArtifactCache`, owned by RoutingView).
 
 **Inputs** come through ShowPanel:
 - the show snapshot, or `playbackTimeRef` when no show runs;

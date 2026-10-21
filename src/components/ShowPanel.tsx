@@ -3,10 +3,10 @@ import type { Neuron, ShowConfig, ShowState, SpikeEvent } from '../types';
 import type { LedFrame } from '../show/ledFrame';
 import { cueLabel, cyclePosition, extrapolateIndex, formatClock, lowerBound, phaseRemainingMs, rateBins } from '../show/showMath';
 import type { FiringBlob } from '../show/routing/firingBlob';
-import type { Telemetry } from '../show/routing/telemetry';
-import type { Vessel } from '../show/routing/vessel';
 import type { PatchData } from '../show/routing/maxPatch';
+import type { Telemetry } from '../show/routing/telemetry';
 import type { TermiteSlices } from '../show/routing/termiteSlices';
+import type { Vessel } from '../show/routing/vessel';
 import { RoutingView } from './RoutingView';
 
 export interface ShowStateSnapshot {
@@ -83,7 +83,6 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
-    const rasterH = RASTER_H;
     const [form, setForm] = useState<FormValues | null>(null);
     const [stopArmed, setStopArmed] = useState(false);
     const running = !!showState?.running;
@@ -140,7 +139,7 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
         const canvas = canvasRef.current;
         if (!canvas || width <= 0) return;
         const dpr = window.devicePixelRatio || 1;
-        const height = OVERVIEW_H + TICKS_H + GAP + CYCLE_H + (hasData ? GAP + rasterH : 0);
+        const height = OVERVIEW_H + TICKS_H + GAP + CYCLE_H + (hasData ? GAP + RASTER_H : 0);
         canvas.width = Math.floor(width * dpr);
         canvas.height = Math.floor(height * dpr);
         canvas.style.width = `${width}px`;
@@ -222,11 +221,11 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
             if (!hasData) return;
             const ry = cy + CYCLE_H + GAP;
             ctx.strokeStyle = '#333';
-            ctx.strokeRect(0.5, ry + 0.5, width - 1, rasterH - 1);
+            ctx.strokeRect(0.5, ry + 0.5, width - 1, RASTER_H - 1);
             if (idx !== null) {
                 const t0 = idx - RASTER_HALF_MS;
                 const t1 = idx + RASTER_HALF_MS;
-                const yScale = (rasterH - 6) / Math.max(1, maxNeuronId);
+                const yScale = (RASTER_H - 6) / Math.max(1, maxNeuronId);
                 const paths = Array.from({ length: ALPHA_BUCKETS * 2 }, () => new Path2D());
                 for (let i = lowerBound(spikes, t0); i < spikes.length && spikes[i].timestamp_ms <= t1; i++) {
                     const s = spikes[i];
@@ -247,12 +246,12 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
             ctx.strokeStyle = dim || idx === null ? '#555' : '#fff';
             ctx.beginPath();
             ctx.moveTo(cx, ry);
-            ctx.lineTo(cx, ry + rasterH);
+            ctx.lineTo(cx, ry + RASTER_H);
             ctx.stroke();
         };
         raf = requestAnimationFrame(draw);
         return () => cancelAnimationFrame(raf);
-    }, [width, rasterH, spikes, hasData, overview, maxNeuronId, connected, latestRef]);
+    }, [width, spikes, hasData, overview, maxNeuronId, connected, latestRef]);
 
     const handleButton = () => {
         if (running) {

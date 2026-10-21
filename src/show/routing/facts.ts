@@ -2,6 +2,8 @@
 // Max patch or a file changes. Numbers are the running system's (the 11.3 scene, the vessel
 // G-code, the bridge); paper figures only where no file exists, labelled with their paper.
 
+import { LED_TRAIL_LENGTH } from '../ledFrame.ts';
+
 export type MediumKey = 'visual' | 'sound' | 'solenoids' | 'led' | 'robot' | 'fab';
 
 /** The artist's order of the media; the tour and the rail follow it. */
@@ -27,7 +29,6 @@ export const BACKBONE_COUNT = 27;
 
 /** Scene_BraveNewWork.unity and its 11.3 *Params.asset files. */
 export const VISUAL_FACTS = {
-    scene: 'Scene_BraveNewWork',
     port: 1234,
     fps: 60,
     blob: 'organoid_firing.f16',
@@ -67,7 +68,7 @@ export const SOUND_FACTS = {
 };
 
 /** src/show/ledFrame.ts and server/serial-bridge.js. */
-export const LED_FACTS = { trail: 5, burstOver: 5, perFrameCap: 10, baud: 115200, idleMs: 500 };
+export const LED_FACTS = { trail: LED_TRAIL_LENGTH, burstOver: 5, perFrameCap: 10, baud: 115200, idleMs: 500 };
 
 /** solenoidSerialCommunication.maxpat: /index → line index + 1 of the file → `<27 digits>` to the
  *  board; all zeros 32 ms after the last line. The file isn't on this machine, so strikes stay ≈. */
@@ -77,8 +78,6 @@ export const SOLENOID_FACTS = { file: 'backboneSpikes.txt', board: 'Daisy Seed',
  *  serial; the modular rebuild (dev/arms/modular) mirrors arms 1–3 to the bridge as /routing/robot/…. */
 export const ROBOT_FACTS = {
     arms: 3,
-    sensor: 'ultrasonic',
-    servo: 'servo',
     sketch: 'ProximityServoArms_Currents.ino',
     rebuild: 'Haptophylla modular',
     badge: "SIMULATED · the firmware's rules, stand-in visitors",
@@ -87,7 +86,7 @@ export const ROBOT_FACTS = {
 
 /** SIGGRAPH 2026 §Biome III: the termite form, from the same agents as Biome I. */
 export const FAB_FACTS = {
-    termite: { material: 'PLA', segments: 4, lattice: '100³', source: 'SIGGRAPH 2026', heightMm: 700 }, // ≈ 70 cm as built (the team)
+    termite: { material: 'PLA', lattice: '100³', source: 'SIGGRAPH 2026', heightMm: 700 }, // ≈ 70 cm as built (the team)
     pipeline: '131 agents · 100³ lattice → point cloud → Poisson surface → 4 PLA segments',
 };
 

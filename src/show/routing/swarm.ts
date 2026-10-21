@@ -3,6 +3,11 @@
 // fleeing the Dispersal that firing termites stamp. A diagram of the mapping, not the Unity render.
 // Units are normalized: the swarm lives in a 1 × 1 square.
 
+import { VISUAL_FACTS } from './facts.ts';
+
+export const SWARM_KEYS = ['physarum', 'boids', 'termites'] as const;
+export type SwarmKey = (typeof SWARM_KEYS)[number];
+
 export interface SwarmSpec {
     perNeuron: number;
     step: number; // per frame at 60 fps
@@ -10,15 +15,16 @@ export interface SwarmSpec {
     spread: number; // how far an agent strays from its neuron before turning home
     speedMul: number; // the scene's firingSpeedMul
     align?: boolean; // agents of a neuron share a drifting heading (boids)
+    flees?: boolean; // runs from the Dispersal that firing termites stamp
 }
 
-export const SWARM_SPECS: Record<'physarum' | 'boids' | 'termites', SwarmSpec> = {
-    physarum: { perNeuron: 18, step: 0.00175, turn: 0.6, spread: 0.07, speedMul: 2 },
-    boids: { perNeuron: 5, step: 0.004, turn: 0.12, spread: 0.12, speedMul: 1.5, align: true },
-    termites: { perNeuron: 1, step: 0.0011, turn: 0.9, spread: 0.045, speedMul: 2 },
+export const SWARM_SPECS: Record<SwarmKey, SwarmSpec> = {
+    physarum: { perNeuron: 18, step: 0.00175, turn: 0.6, spread: 0.07, speedMul: VISUAL_FACTS.swarms.physarum.speedMul, flees: true },
+    boids: { perNeuron: 5, step: 0.004, turn: 0.12, spread: 0.12, speedMul: VISUAL_FACTS.swarms.boids.speedMul, align: true, flees: true },
+    termites: { perNeuron: 1, step: 0.0011, turn: 0.9, spread: 0.045, speedMul: VISUAL_FACTS.swarms.termites.speedMul },
 };
 
-export const FLEE_RADIUS = 0.06;
+const FLEE_RADIUS = 0.06;
 export const HOME_PAD = 0.06;
 const TAU = Math.PI * 2;
 

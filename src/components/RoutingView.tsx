@@ -6,27 +6,26 @@ import { formatClock } from '../show/showMath';
 import { CARD_TITLES, VISUAL_FACTS } from '../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../show/routing/facts';
 import type { FiringBlob } from '../show/routing/firingBlob';
-import { detailLayout, hitBox, routingLayout } from '../show/routing/layout';
-import type { Box, DetailLayout, RoutingLayout } from '../show/routing/layout';
+import { detailLayout, hitBox, inside, routingLayout } from '../show/routing/layout';
+import type { DetailLayout, RoutingLayout } from '../show/routing/layout';
 import { advanceLive, createLiveState } from '../show/routing/live';
-import { routingPlayhead } from '../show/routing/playhead';
-import { SWARM_SPECS, createSwarm, fleeSources, stepSwarm } from '../show/routing/swarm';
-import type { Swarm } from '../show/routing/swarm';
-import type { Telemetry } from '../show/routing/telemetry';
-import { createTour, setTourEnabled, tourCurrent, tourInteract, tourPaused, tourProgress, tourTick } from '../show/routing/tour';
-import type { TourState } from '../show/routing/tour';
 import type { PatchData } from '../show/routing/maxPatch';
+import { routingPlayhead } from '../show/routing/playhead';
+import { SWARM_KEYS, SWARM_SPECS, createSwarm, fleeSources, stepSwarm } from '../show/routing/swarm';
+import type { Swarm, SwarmKey } from '../show/routing/swarm';
+import type { Telemetry } from '../show/routing/telemetry';
 import type { TermiteSlices } from '../show/routing/termiteSlices';
-import { createArtifactCache } from './routing/artifactGlyphs';
+import { createTour, setTourEnabled, tourActive, tourCurrent, tourInteract, tourProgress, tourTick } from '../show/routing/tour';
+import type { TourState } from '../show/routing/tour';
 import { layerForIndex } from '../show/routing/vessel';
 import type { Vessel } from '../show/routing/vessel';
 import { loadRoutingSettings, saveRoutingSettings } from '../utils/routingSettings';
 import type { RoutingSettings } from '../utils/routingSettings';
+import { createArtifactCache } from './routing/artifactGlyphs';
 import { closeBox, drawDetail } from './routing/details';
 import { paintSwarm } from './routing/glyphs';
 import type { SwarmStyle } from './routing/glyphs';
 import { drawOverview } from './routing/overview';
-import type { SwarmKey } from './routing/overview';
 import type { ShowStateSnapshot } from './ShowPanel';
 
 interface RoutingViewProps {
@@ -48,7 +47,6 @@ interface RoutingViewProps {
 const FRAME_MS = 1000 / 30; // a display, not a control: same cap as the circular graph
 const FRAME_SLACK_MS = 2; // vsync jitter: without it the gate often skips to 41.7 or 50 ms frames
 const SWARM_PX = 512;
-const SWARM_KEYS: SwarmKey[] = ['physarum', 'boids', 'termites'];
 const SWARM_STYLES: Record<SwarmKey, SwarmStyle> = {
     physarum: { fade: 0.06, dim: 'rgba(140,140,140,0.22)' },
     boids: { fade: 0.18, dim: 'rgba(160,160,160,0.5)' },
@@ -57,8 +55,6 @@ const SWARM_STYLES: Record<SwarmKey, SwarmStyle> = {
 const OUTPUT_LABELS: Record<VisualOutput, string> = { unity: 'Unity direct', td: '+ TD mapping', 'td-sd': '+ TD mapping + StreamDiffusion' };
 const PRESENTATION_MIN_H = 360;
 const NORMAL_MIN_H = 420;
-
-const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
 
 /** Where the show's signal goes and how each medium maps it, drawn live from the playhead. */
 export function RoutingView(props: RoutingViewProps) {
@@ -85,8 +81,8 @@ export function RoutingView(props: RoutingViewProps) {
     const shown = presentation || settings.visible; // presentation always shows it
     const height = props.height ?? (presentation && fitHeight ? fitHeight : Math.max(NORMAL_MIN_H, Math.round((width * 9) / 16)));
 
-    const update = (patch: Partial<RoutingSettings>) => setSettings(s => {
-        const next = { ...s, ...patch };
+    const update = (change: Partial<RoutingSettings>) => setSettings(s => {
+        const next = { ...s, ...change };
         saveRoutingSettings(next);
         return next;
     });
@@ -112,7 +108,7 @@ export function RoutingView(props: RoutingViewProps) {
     useEffect(() => {
         const interact = () => {
             const now = performance.now();
-            if (tourRef.current.enabled && !tourPaused(tourRef.current, now)) detailRef.current = shownRef.current;
+            if (tourActive(tourRef.current, now)) detailRef.current = shownRef.current;
             tourRef.current = tourInteract(tourRef.current, now);
         };
         const events = ['pointerdown', 'keydown', 'wheel'] as const;
@@ -206,7 +202,7 @@ export function RoutingView(props: RoutingViewProps) {
             // The tour picks the view while it runs; a pause leaves the manual choice; when the
             // pause ends it starts again at the overview.
             const tour = (tourRef.current = tourTick(tourRef.current, ts));
-            const touring = tour.enabled && !tourPaused(tour, ts);
+            const touring = tourActive(tour, ts);
             if (touring && !wasTouring) detailRef.current = null;
             wasTouring = touring;
             const stop = tourCurrent(tour);
@@ -225,7 +221,7 @@ export function RoutingView(props: RoutingViewProps) {
             const frames = dtMs / (1000 / 60);
             fleeSources(swarms.termites.swarm, live.firing, VISUAL_FACTS.threshold, flee);
             for (const k of SWARM_KEYS) {
-                stepSwarm(swarms[k].swarm, live.firing, VISUAL_FACTS.threshold, frames, k === 'termites' ? null : flee);
+                stepSwarm(swarms[k].swarm, live.firing, VISUAL_FACTS.threshold, frames, SWARM_SPECS[k].flees ? flee : null);
                 paintSwarm(swarms[k].canvas, swarms[k].swarm, live.firing, VISUAL_FACTS.threshold, SWARM_STYLES[k], frames);
             }
 
@@ -251,7 +247,7 @@ export function RoutingView(props: RoutingViewProps) {
                 scale: layout.scale,
                 now: ts,
             };
-            if (open) drawDetail(g, details, open, { ...input, scale: details.scale });
+            if (open) drawDetail(g, details, open, input);
             else drawOverview(g, layout, input);
         };
         raf = requestAnimationFrame(frame);
