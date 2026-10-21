@@ -21,9 +21,10 @@ export function text(g: G, s: string, x: number, y: number, px: number, color: s
     g.fillText(s, x, y);
 }
 
-/** A word cut into pieces no wider than `w` (a file name in a narrow column), in the current font. */
+/** A word cut into pieces no wider than `w` (a file name in a narrow column), in the current font;
+ *  whole when not even a character fits. */
 function pieces(g: G, word: string, w: number): string[] {
-    if (g.measureText(word).width <= w) return [word];
+    if (g.measureText(word).width <= w || g.measureText(word.slice(0, 1)).width > w) return [word];
     const out: string[] = [];
     let cur = '';
     for (const ch of word) {

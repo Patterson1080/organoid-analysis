@@ -139,7 +139,7 @@ export function RoutingView(props: RoutingViewProps) {
     useEffect(() => {
         const el = canvasRef.current;
         if (!el) return;
-        const io = new IntersectionObserver(([entry]) => { visibleRef.current = entry.isIntersecting; });
+        const io = new IntersectionObserver(entries => { visibleRef.current = entries[entries.length - 1].isIntersecting; }); // the newest of a batch
         io.observe(el);
         return () => io.disconnect();
     }, [shown]);
