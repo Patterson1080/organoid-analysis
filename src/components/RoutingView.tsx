@@ -6,14 +6,15 @@ import { extrapolateIndex, phaseRemainingMs } from '../show/showMath';
 import { VISUAL_FACTS } from '../show/routing/facts';
 import type { MediumKey } from '../show/routing/facts';
 import type { FiringBlob } from '../show/routing/firingBlob';
-import { hitBox, routingLayout } from '../show/routing/layout';
-import type { RoutingLayout } from '../show/routing/layout';
+import { detailLayout, hitBox, routingLayout } from '../show/routing/layout';
+import type { Box, DetailLayout, RoutingLayout } from '../show/routing/layout';
 import { advanceLive, createLiveState } from '../show/routing/live';
 import { SWARM_SPECS, createSwarm, fleeSources, stepSwarm } from '../show/routing/swarm';
 import type { Swarm } from '../show/routing/swarm';
 import type { Telemetry } from '../show/routing/telemetry';
 import { layerForIndex } from '../show/routing/vessel';
 import type { Vessel } from '../show/routing/vessel';
+import { closeBox, drawDetail } from './routing/details';
 import { paintSwarm } from './routing/glyphs';
 import type { SwarmStyle } from './routing/glyphs';
 import { drawOverview } from './routing/overview';
@@ -43,12 +44,16 @@ const SWARM_STYLES: Record<SwarmKey, SwarmStyle> = {
     termites: { fade: 0.012, dim: 'rgba(190,190,190,0.35)' },
 };
 
+const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+
 /** Where the show's signal goes and how each medium maps it, drawn live from the playhead. */
 export function RoutingView(props: RoutingViewProps) {
     const { neurons, spikes, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel } = props;
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const layoutRef = useRef<RoutingLayout | null>(null);
+    const detailLayoutRef = useRef<DetailLayout | null>(null);
+    const detailRef = useRef<MediumKey | null>(null); // the open detail, null on the overview
     const hoverRef = useRef<MediumKey | null>(null);
     const visibleRef = useRef(true);
     const [width, setWidth] = useState(0);
@@ -94,7 +99,9 @@ export function RoutingView(props: RoutingViewProps) {
         const g = canvas.getContext('2d');
         if (!g) return;
         const layout = routingLayout(width, height);
+        const details = detailLayout(width, height);
         layoutRef.current = layout;
+        detailLayoutRef.current = details;
         const canvases = {} as Record<SwarmKey, HTMLCanvasElement>;
         for (const k of SWARM_KEYS) canvases[k] = swarms[k].canvas;
         const flee: number[] = [];
@@ -139,7 +146,7 @@ export function RoutingView(props: RoutingViewProps) {
             g.setTransform(dpr, 0, 0, dpr, 0, 0);
             g.fillStyle = '#000';
             g.fillRect(0, 0, width, height);
-            drawOverview(g, layout, {
+            const input = {
                 live,
                 swarms: canvases,
                 vessel,
@@ -150,28 +157,58 @@ export function RoutingView(props: RoutingViewProps) {
                 offRemainingMs,
                 dim: phase === 'off' ? 0.3 : 1,
                 hover: hoverRef.current,
-                visualOutput: 'unity',
+                visualOutput: 'unity' as const,
                 scale: layout.scale,
                 now: ts,
-            });
+            };
+            const open = detailRef.current;
+            if (open) drawDetail(g, details, open, { ...input, scale: details.scale });
+            else drawOverview(g, layout, input);
         };
         raf = requestAnimationFrame(frame);
         return () => cancelAnimationFrame(raf);
     }, [width, height, live, swarms, neurons, spikes, firingBlob, vessel, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef]);
 
-    const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-        const layout = layoutRef.current;
-        if (!layout) return;
+    const local = (e: ReactPointerEvent<HTMLCanvasElement>) => {
         const r = e.currentTarget.getBoundingClientRect();
-        const key = hitBox(layout.cards, e.clientX - r.left, e.clientY - r.top);
-        hoverRef.current = key;
-        e.currentTarget.style.cursor = key ? 'pointer' : 'default';
+        return [e.clientX - r.left, e.clientY - r.top] as const;
+    };
+
+    // What a tap at (x, y) would do: open a card, switch to a rail tile, or close the detail.
+    const target = (x: number, y: number): { open: MediumKey | null } | null => {
+        const layout = layoutRef.current, details = detailLayoutRef.current;
+        if (!layout || !details) return null;
+        if (!detailRef.current) {
+            const key = hitBox(layout.cards, x, y);
+            return key ? { open: key } : null;
+        }
+        const tile = hitBox(details.railTiles, x, y);
+        if (tile) return { open: tile };
+        if (inside(closeBox(details), x, y) || inside(details.story, x, y)) return { open: null };
+        return null;
+    };
+
+    const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+        const [x, y] = local(e);
+        hoverRef.current = !detailRef.current && layoutRef.current ? hitBox(layoutRef.current.cards, x, y) : null;
+        e.currentTarget.style.cursor = target(x, y) ? 'pointer' : 'default';
+    };
+
+    const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+        const t = target(...local(e));
+        if (t) detailRef.current = t.open;
     };
 
     return (
         <div ref={wrapRef} style={{ marginTop: 'var(--space-md)' }}>
             <div className="data-label" style={{ marginBottom: 'var(--space-sm)', letterSpacing: '0.12em' }}>ROUTING · SIGNAL → MEDIUM</div>
-            <canvas ref={canvasRef} style={{ display: 'block' }} onPointerMove={onPointerMove} onPointerLeave={() => { hoverRef.current = null; }} />
+            <canvas
+                ref={canvasRef}
+                style={{ display: 'block', touchAction: 'manipulation' }}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerLeave={() => { hoverRef.current = null; }}
+            />
         </div>
     );
 }
