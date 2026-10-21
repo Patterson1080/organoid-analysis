@@ -1,29 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, MutableRefObject, PointerEvent as ReactPointerEvent } from 'react';
 import type { Neuron, SpikeEvent } from '../types';
-import type { LedFrame } from '../show/ledFrame';
 import { formatClock } from '../show/showMath';
 import { CARD_TITLES, VISUAL_FACTS } from '../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../show/routing/facts';
 import type { FiringBlob } from '../show/routing/firingBlob';
-import { detailLayout, hitBox, routingLayout } from '../show/routing/layout';
-import type { Box, DetailLayout, RoutingLayout } from '../show/routing/layout';
+import { detailLayout, hitBox, inside, routingLayout } from '../show/routing/layout';
+import type { DetailLayout, RoutingLayout } from '../show/routing/layout';
 import { advanceLive, createLiveState } from '../show/routing/live';
+import type { StampedLedFrame } from '../show/routing/live';
+import type { PatchData } from '../show/routing/maxPatch';
 import { routingPlayhead } from '../show/routing/playhead';
-import { SWARM_SPECS, createSwarm, fleeSources, stepSwarm } from '../show/routing/swarm';
-import type { Swarm } from '../show/routing/swarm';
+import { SWARM_KEYS, SWARM_SPECS, createSwarm, fleeSources, stepSwarm } from '../show/routing/swarm';
+import type { Swarm, SwarmKey } from '../show/routing/swarm';
 import type { Telemetry } from '../show/routing/telemetry';
-import { createTour, setTourEnabled, tourCurrent, tourInteract, tourPaused, tourProgress, tourTick } from '../show/routing/tour';
+import type { TermiteSlices } from '../show/routing/termiteSlices';
+import { createTour, setTourEnabled, tourActive, tourCurrent, tourInteract, tourProgress, tourTick } from '../show/routing/tour';
 import type { TourState } from '../show/routing/tour';
 import { layerForIndex } from '../show/routing/vessel';
 import type { Vessel } from '../show/routing/vessel';
 import { loadRoutingSettings, saveRoutingSettings } from '../utils/routingSettings';
 import type { RoutingSettings } from '../utils/routingSettings';
+import { createArtifactCache } from './routing/artifactGlyphs';
 import { closeBox, drawDetail } from './routing/details';
 import { paintSwarm } from './routing/glyphs';
 import type { SwarmStyle } from './routing/glyphs';
 import { drawOverview } from './routing/overview';
-import type { SwarmKey } from './routing/overview';
 import type { ShowStateSnapshot } from './ShowPanel';
 
 interface RoutingViewProps {
@@ -31,10 +33,12 @@ interface RoutingViewProps {
     spikes: SpikeEvent[]; // sorted by timestamp_ms
     showLatestRef: MutableRefObject<ShowStateSnapshot | null>;
     playbackTimeRef: MutableRefObject<number>;
-    ledFrameRef: MutableRefObject<LedFrame | null>;
+    ledFramesRef: MutableRefObject<StampedLedFrame[]>; // App queues every frame it computes; the view drains them
     telemetryRef: MutableRefObject<Telemetry>;
     firingBlob: FiringBlob | null;
     vessel: Vessel | null;
+    patch: PatchData | null;
+    termite: TermiteSlices | null;
     connected: boolean;
     presentation: boolean;
     height?: number; // overrides the sizing below
@@ -42,8 +46,8 @@ interface RoutingViewProps {
 
 const FRAME_MS = 1000 / 30; // a display, not a control: same cap as the circular graph
 const FRAME_SLACK_MS = 2; // vsync jitter: without it the gate often skips to 41.7 or 50 ms frames
+const MAX_FRAME_MS = 100; // a stall steps the swarms like one slow frame, as the live state and sound sim do
 const SWARM_PX = 512;
-const SWARM_KEYS: SwarmKey[] = ['physarum', 'boids', 'termites'];
 const SWARM_STYLES: Record<SwarmKey, SwarmStyle> = {
     physarum: { fade: 0.06, dim: 'rgba(140,140,140,0.22)' },
     boids: { fade: 0.18, dim: 'rgba(160,160,160,0.5)' },
@@ -53,11 +57,21 @@ const OUTPUT_LABELS: Record<VisualOutput, string> = { unity: 'Unity direct', td:
 const PRESENTATION_MIN_H = 360;
 const NORMAL_MIN_H = 420;
 
-const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+/** Padding, borders and margins below the canvas, up the page: in presentation the canvas is the
+ *  last box in every ancestor, so this is the room the fit leaves under it. */
+function spaceBelow(el: Element): number {
+    let px = 0;
+    for (let n = el.parentElement; n; n = n.parentElement) {
+        const cs = getComputedStyle(n);
+        px += (parseFloat(cs.paddingBottom) || 0) + (parseFloat(cs.borderBottomWidth) || 0) + (parseFloat(cs.marginBottom) || 0);
+    }
+    return px;
+}
 
 /** Where the show's signal goes and how each medium maps it, drawn live from the playhead. */
 export function RoutingView(props: RoutingViewProps) {
-    const { neurons, spikes, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel, presentation } = props;
+    const { neurons, spikes, showLatestRef, playbackTimeRef, ledFramesRef, telemetryRef, firingBlob, vessel, patch, termite, presentation } = props;
+    const artifacts = useMemo(createArtifactCache, []); // offscreen layer renders, kept across frames
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const tourTextRef = useRef<HTMLSpanElement>(null);
@@ -79,8 +93,8 @@ export function RoutingView(props: RoutingViewProps) {
     const shown = presentation || settings.visible; // presentation always shows it
     const height = props.height ?? (presentation && fitHeight ? fitHeight : Math.max(NORMAL_MIN_H, Math.round((width * 9) / 16)));
 
-    const update = (patch: Partial<RoutingSettings>) => setSettings(s => {
-        const next = { ...s, ...patch };
+    const update = (change: Partial<RoutingSettings>) => setSettings(s => {
+        const next = { ...s, ...change };
         saveRoutingSettings(next);
         return next;
     });
@@ -106,7 +120,7 @@ export function RoutingView(props: RoutingViewProps) {
     useEffect(() => {
         const interact = () => {
             const now = performance.now();
-            if (tourRef.current.enabled && !tourPaused(tourRef.current, now)) detailRef.current = shownRef.current;
+            if (tourActive(tourRef.current, now)) detailRef.current = shownRef.current;
             tourRef.current = tourInteract(tourRef.current, now);
         };
         const events = ['pointerdown', 'keydown', 'wheel'] as const;
@@ -130,20 +144,23 @@ export function RoutingView(props: RoutingViewProps) {
         return () => io.disconnect();
     }, [shown]);
 
-    // Presentation: the rest of the screen below the timeline, whatever its shape.
+    // Presentation: the rest of the screen below the timeline, whatever its shape. Refitted whenever
+    // the panel resizes (the timeline growing once data arrives, the HUD wrapping) or the window does.
     useEffect(() => {
         if (!presentation || !shown) return;
         const fit = () => {
             const el = canvasRef.current;
             if (!el) return;
             const top = el.getBoundingClientRect().top + window.scrollY;
-            setFitHeight(Math.max(PRESENTATION_MIN_H, Math.floor(window.innerHeight - top - 16)));
+            setFitHeight(Math.max(PRESENTATION_MIN_H, Math.floor(window.innerHeight - top - spaceBelow(el))));
         };
         fit();
-        const settle = setTimeout(fit, 300); // after the panel above has laid out
+        const ro = new ResizeObserver(fit);
+        const panel = wrapRef.current?.parentElement;
+        if (panel) ro.observe(panel);
         window.addEventListener('resize', fit);
         return () => {
-            clearTimeout(settle);
+            ro.disconnect();
             window.removeEventListener('resize', fit);
         };
     }, [presentation, shown, width]);
@@ -168,7 +185,6 @@ export function RoutingView(props: RoutingViewProps) {
         const flee: number[] = [];
         let raf = 0;
         let last = 0;
-        let parked: number | null = null; // last playhead, held through OFF for the vessel layer
         let wasTouring = true;
         let tourText = '';
 
@@ -180,7 +196,7 @@ export function RoutingView(props: RoutingViewProps) {
                 return;
             }
             if (last && ts - last < FRAME_MS - FRAME_SLACK_MS) return;
-            const dtMs = last ? ts - last : FRAME_MS;
+            const dtMs = last ? Math.min(ts - last, MAX_FRAME_MS) : FRAME_MS;
             last = ts;
             try {
                 draw(ts, dtMs);
@@ -194,13 +210,12 @@ export function RoutingView(props: RoutingViewProps) {
         };
 
         const draw = (ts: number, dtMs: number) => {
-            const { index, phase, mode, offRemainingMs } = routingPlayhead(showLatestRef.current, connectedRef.current, playbackTimeRef.current, neurons.length > 0, ts);
-            if (index !== null) parked = index;
+            const { index, phase, mode, offRemainingMs, pass, range, fps, config } = routingPlayhead(showLatestRef.current, connectedRef.current, playbackTimeRef.current, neurons.length > 0, ts);
 
             // The tour picks the view while it runs; a pause leaves the manual choice; when the
             // pause ends it starts again at the overview.
             const tour = (tourRef.current = tourTick(tourRef.current, ts));
-            const touring = tour.enabled && !tourPaused(tour, ts);
+            const touring = tourActive(tour, ts);
             if (touring && !wasTouring) detailRef.current = null;
             wasTouring = touring;
             const stop = tourCurrent(tour);
@@ -215,12 +230,15 @@ export function RoutingView(props: RoutingViewProps) {
             }
             if (tourBarRef.current) tourBarRef.current.style.width = `${Math.round(tourProgress(tour, ts) * 100)}%`;
 
-            advanceLive(live, { index, spikes, blob: firingBlob, ledFrame: ledFrameRef.current, telemetry: telemetryRef.current, dtMs, now: ts });
-            const frames = dtMs / (1000 / 60);
-            fleeSources(swarms.termites.swarm, live.firing, VISUAL_FACTS.threshold, flee);
-            for (const k of SWARM_KEYS) {
-                stepSwarm(swarms[k].swarm, live.firing, VISUAL_FACTS.threshold, frames, k === 'termites' ? null : flee);
-                paintSwarm(swarms[k].canvas, swarms[k].swarm, live.firing, VISUAL_FACTS.threshold, SWARM_STYLES[k], frames);
+            advanceLive(live, { index, spikes, blob: firingBlob, ledFrames: ledFramesRef.current.splice(0), telemetry: telemetryRef.current, dtMs, now: ts, patch, mode, pass, range });
+            // EoC goes dark with its sims paused through OFF: the stand-ins hold where they are too.
+            if (phase !== 'off') {
+                const frames = dtMs / (1000 / 60);
+                fleeSources(swarms.termites.swarm, live.firing, VISUAL_FACTS.threshold, flee);
+                for (const k of SWARM_KEYS) {
+                    stepSwarm(swarms[k].swarm, live.firing, VISUAL_FACTS.threshold, frames, SWARM_SPECS[k].flees ? flee : null);
+                    paintSwarm(swarms[k].canvas, swarms[k].swarm, live.firing, VISUAL_FACTS.threshold, SWARM_STYLES[k], frames);
+                }
             }
 
             g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -230,9 +248,16 @@ export function RoutingView(props: RoutingViewProps) {
                 live,
                 swarms: canvases,
                 vessel,
-                vesselLayer: vessel ? layerForIndex(vessel, parked ?? 0) : 0,
+                patch,
+                range,
+                termite,
+                artifacts,
+                // OFF holds the pass's last layer: the bridge always sends endIndex before /sim_off.
+                vesselLayer: vessel ? layerForIndex(vessel, index ?? (phase === 'off' ? range.end : 0)) : 0,
                 index,
                 mode,
+                fps,
+                showConfig: config,
                 phase,
                 offRemainingMs,
                 dim: phase === 'off' ? 0.3 : 1,
@@ -241,12 +266,12 @@ export function RoutingView(props: RoutingViewProps) {
                 scale: layout.scale,
                 now: ts,
             };
-            if (open) drawDetail(g, details, open, { ...input, scale: details.scale });
+            if (open) drawDetail(g, details, open, input);
             else drawOverview(g, layout, input);
         };
         raf = requestAnimationFrame(frame);
         return () => cancelAnimationFrame(raf);
-    }, [shown, width, height, live, swarms, neurons, spikes, firingBlob, vessel, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef]);
+    }, [shown, width, height, live, swarms, neurons, spikes, firingBlob, vessel, patch, termite, artifacts, showLatestRef, playbackTimeRef, ledFramesRef, telemetryRef]);
 
     const local = (e: ReactPointerEvent<HTMLCanvasElement>) => {
         const r = e.currentTarget.getBoundingClientRect();

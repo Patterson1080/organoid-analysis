@@ -1,27 +1,41 @@
 // The routing overview: the organoid in the centre, the media the bridge feeds on one side,
 // the audio computer's group on the other, and the spokes between them.
 
+import type { ShowConfig } from '../../types';
 import { formatClock } from '../../show/showMath';
-import { firingCaption, pad6 } from '../../show/routing/captions';
-import { ATTRIBUTION, CARD_TITLES, LED_FACTS, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
+import { firingCaption, indexLabel, robotCaption, strikeCaption } from '../../show/routing/captions';
+import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../../show/routing/facts';
 import type { Box, RoutingLayout } from '../../show/routing/layout';
-import { fontPx } from '../../show/routing/layout';
+import { fontPx, row } from '../../show/routing/layout';
+import { armIsLive, firingCount } from '../../show/routing/live';
 import type { LiveState } from '../../show/routing/live';
-import { printedLayers } from '../../show/routing/vessel';
+import type { PatchData } from '../../show/routing/maxPatch';
+import { pairLayout } from '../../show/routing/sliceView';
+import { SWARM_KEYS } from '../../show/routing/swarm';
+import type { SwarmKey } from '../../show/routing/swarm';
+import type { TermiteSlices } from '../../show/routing/termiteSlices';
 import type { Vessel } from '../../show/routing/vessel';
-import { MONO, arrowHead, clipTo, frame, hangingArms, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, text, vesselProfile, vesselTop } from './glyphs';
+import { LINE_H, MONO, arrowHead, clipTo, frame, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, tagSize, text } from './glyphs';
 import type { G } from './glyphs';
-
-export type SwarmKey = 'physarum' | 'boids' | 'termites';
+import { armPhaseText, armsPanel } from './armGlyphs';
+import { activityStrip, chordName, chordStrip, rateText } from './soundGlyphs';
+import { grownVessel, stackExtent, termiteFrame, turningTermite, vesselFrame } from './artifactGlyphs';
+import type { ArtifactCache } from './artifactGlyphs';
 
 export interface DrawInput {
     live: LiveState;
     swarms: Record<SwarmKey, HTMLCanvasElement>;
     vessel: Vessel | null;
     vesselLayer: number;
+    patch: PatchData | null;
+    range: { start: number; end: number }; // the indices a pass covers
+    termite: TermiteSlices | null;
+    artifacts: ArtifactCache;
     index: number | null;
     mode: 'show' | 'local';
+    fps: number | null; // the show's /index rate (its config); null in local playback
+    showConfig: ShowConfig | null; // the bridge's show config, when it has said
     phase: 'on' | 'off' | 'stopped';
     offRemainingMs: number;
     dim: number;
@@ -34,30 +48,17 @@ export interface DrawInput {
 const DASH_FLOW_MS = 18; // dash offset per ms on the /index spokes
 const PULSE_MS = 550;
 
-export const firingCount = (live: LiveState) => {
-    let n = 0;
-    for (let i = 0; i < live.firing.length; i++) if (live.firing[i] >= VISUAL_FACTS.threshold) n++;
-    return n;
-};
-
-
 /** A card's header band and the body below it, split into a glyph area and a text area. */
-export function cardParts(b: Box, scale: number, textRows: number): { glyph: Box; textBox: Box } {
+function cardParts(b: Box, scale: number, textRows: number): { glyph: Box; textBox: Box } {
     const pad = 8 * scale, head = fontPx(11, scale) + 9 * scale;
     const body: Box = { x: b.x + pad, y: b.y + head, w: b.w - 2 * pad, h: b.h - head - pad };
-    const textH = textRows * fontPx(9, scale) * 1.45;
+    const textH = textRows * fontPx(9, scale) * LINE_H;
     if (body.w / Math.max(1, body.h) >= 1.9) {
         const gw = body.w * 0.56;
         return { glyph: { x: body.x, y: body.y, w: gw, h: body.h }, textBox: { x: body.x + gw + pad, y: body.y, w: body.w - gw - pad, h: body.h } };
     }
     const gh = Math.max(0, body.h - textH - pad / 2);
     return { glyph: { x: body.x, y: body.y, w: body.w, h: gh }, textBox: { x: body.x, y: body.y + gh + pad / 2, w: body.w, h: textH } };
-}
-
-/** Split a box into `n` equal boxes side by side with `gap` between them. */
-export function row(b: Box, n: number, gap: number): Box[] {
-    const w = (b.w - gap * (n - 1)) / n;
-    return Array.from({ length: n }, (_, i) => ({ x: b.x + i * (w + gap), y: b.y, w, h: b.h }));
 }
 
 function cardHead(g: G, b: Box, key: MediumKey, hover: boolean, scale: number) {
@@ -78,18 +79,20 @@ function anchor(b: Box, cx: number, cy: number): [number, number] {
     return [Math.min(Math.max(cx, b.x), b.x + b.w), Math.min(Math.max(cy, b.y), b.y + b.h)];
 }
 
+type Segment = { sx: number; sy: number; ax: number; ay: number };
+
 /** A spoke from the organoid to a card. `/index` streams flow as moving dashes only while the
  *  playhead advances, since nothing is sent otherwise. */
-function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offline', now: number, flowing = true): { sx: number; sy: number; ax: number; ay: number } {
+function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offline', now: number, flowing = true): Segment {
     const { cx, cy, r } = l.centre;
     const [ax, ay] = anchor(b, cx, cy);
     const a = Math.atan2(ay - cy, ax - cx);
     const sx = cx + Math.cos(a) * (r + 3), sy = cy + Math.sin(a) * (r + 3);
     g.lineWidth = 1;
+    g.lineDashOffset = kind === 'stream' && flowing ? -now / DASH_FLOW_MS : 0; // only a flowing /index moves
     if (kind === 'stream') {
         g.strokeStyle = '#9a9a9a';
         g.setLineDash([2, 5]);
-        g.lineDashOffset = flowing ? -now / DASH_FLOW_MS : 0;
     } else {
         g.strokeStyle = kind === 'offline' ? '#333' : '#3a3a3a';
         g.setLineDash(kind === 'offline' ? [1, 4] : []);
@@ -102,15 +105,11 @@ function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offli
     return { sx, sy, ax, ay };
 }
 
-type Segment = { sx: number; sy: number; ax: number; ay: number };
-
 /** A protocol tag on a spoke, drawn after the cards: at the middle of the spoke, or slid toward
  *  (and just inside) the circle until it clears every card and every tag already placed, which
  *  it joins. */
 function spokeTag(g: G, s: Segment, label: string, avoid: Box[], scale: number, color = '#888') {
-    const px = fontPx(8, scale);
-    g.font = `${px}px ${MONO}`;
-    const w = g.measureText(label).width + px * 0.8, h = px * 1.5;
+    const px = fontPx(8, scale), { w, h } = tagSize(g, label, px);
     const at = (t: number) => ({ x: s.sx + (s.ax - s.sx) * t, y: s.sy + (s.ay - s.sy) * t });
     const clear = (p: { x: number; y: number }) => !avoid.some(c => overlaps({ x: p.x - w / 2, y: p.y - h / 2, w, h }, c));
     const spot = [0.5, 0.3, 0.1, -0.15, -0.35, -0.55].map(at).find(clear) ?? at(-0.35);
@@ -125,7 +124,7 @@ function fit(g: G, s: string, maxW: number): string {
     return out.length > 1 ? `${out}…` : '';
 }
 
-function pulse(g: G, s: { sx: number; sy: number; ax: number; ay: number }, t: number, scale: number) {
+function pulse(g: G, s: Segment, t: number, scale: number) {
     if (t < 0 || t > 1) return;
     const d = 3 * scale;
     g.fillStyle = `rgba(255,255,255,${1 - t * 0.6})`;
@@ -150,25 +149,30 @@ function drawCentre(g: G, l: RoutingLayout, v: DrawInput) {
         text(g, `■ OFF · ON IN ${formatClock(v.offRemainingMs)}`, cx, y, fontPx(12, s), '#fff', 'center');
         g.restore();
     } else {
-        text(g, `/index ${v.index === null ? '——————' : pad6(v.index)}`, cx, y, fontPx(13, s), '#fff', 'center');
+        text(g, indexLabel(v.index), cx, y, fontPx(13, s), '#fff', 'center');
     }
     y += fontPx(13, s) * 1.35;
-    text(g, v.mode === 'show' ? `show clock · ${VISUAL_FACTS.fps}/s` : 'local playback', cx, y, fontPx(8, s), '#777', 'center');
+    text(g, v.mode === 'show' ? `show clock · ${v.fps}/s` : 'local playback', cx, y, fontPx(8, s), '#777', 'center');
     y += fontPx(8, s) * 1.5;
-    text(g, ATTRIBUTION, cx, y, fontPx(8, s), '#5a5a5a', 'center');
+    // The attribution shows whole: on two lines when the circle is narrower than it (the cards drawn
+    // after it would cover its ends).
+    const apx = fontPx(8, s), cut = ATTRIBUTION.lastIndexOf(' · ');
+    g.font = `${apx}px ${MONO}`;
+    const parts = g.measureText(ATTRIBUTION).width <= 2 * r || cut < 0 ? [ATTRIBUTION] : [ATTRIBUTION.slice(0, cut), ATTRIBUTION.slice(cut + 3)];
+    parts.forEach((part, i) => text(g, part, cx, y + i * apx * LINE_H, apx, '#5a5a5a', 'center'));
 }
 
 function drawVisual(g: G, b: Box, v: DrawInput) {
     const s = v.scale, { glyph, textBox } = cardParts(b, s, 3);
-    const keys: SwarmKey[] = ['physarum', 'boids', 'termites'];
     row(glyph, 3, 6 * s).forEach((cell, i) => {
         const labelH = fontPx(8, s) * 1.4;
-        swarmPanel(g, { ...cell, h: cell.h - labelH }, v.swarms[keys[i]]);
-        const sw = VISUAL_FACTS.swarms[keys[i]];
+        swarmPanel(g, { ...cell, h: cell.h - labelH }, v.swarms[SWARM_KEYS[i]]);
+        const sw = VISUAL_FACTS.swarms[SWARM_KEYS[i]];
         text(g, `${sw.label} ${sw.agents}`, cell.x + cell.w / 2, cell.y + cell.h - labelH + 2 * s, fontPx(8, s), '#bbb', 'center');
     });
     const firingLine: [string, string] = [firingCaption(v.live.firingSource, v.live.neurons.length, firingCount(v.live)), '#bbb'];
-    lines(g, [firingLine, ['firing → speed ×2 / ×1.5 / ×2 · deposit', '#888'], ['termite firing → Dispersal → others flee', '#888']], textBox, s);
+    const speeds = SWARM_KEYS.map(k => `×${VISUAL_FACTS.swarms[k].speedMul}`).join(' / ');
+    lines(g, [firingLine, [`firing → speed ${speeds} · deposit`, '#888'], ['termite firing → Dispersal → others flee', '#888']], textBox, s);
 }
 
 function drawLed(g: G, b: Box, v: DrawInput) {
@@ -179,25 +183,50 @@ function drawLed(g: G, b: Box, v: DrawInput) {
 }
 
 function drawFab(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, { glyph, textBox } = cardParts(b, s, 3);
-    const vessel = v.vessel;
-    if (!vessel) {
-        lines(g, [['no vessel data (data/vessel.gcode)', '#777'], ['same recording → growth → G-code', '#555']], { ...glyph, y: glyph.y + glyph.h / 3 }, s);
+    const s = v.scale, { glyph, textBox } = cardParts(b, s, 3), { termite, vessel } = v, px = fontPx(8, s);
+    if (!termite && !vessel) {
+        lines(g, [['no artifact data (data/)', '#777'], ['same recording → growth → print', '#555']], { ...glyph, y: glyph.y + glyph.h / 3 }, s);
         return;
     }
-    const [side, top] = [{ ...glyph, w: glyph.w * 0.32 }, { ...glyph, x: glyph.x + glyph.w * 0.36, w: glyph.w * 0.64 }];
-    const printed = printedLayers(vessel, VESSEL_FACTS.printedMm);
-    vesselProfile(g, side, vessel, v.vesselLayer, printed);
-    vesselTop(g, top, vessel, v.vesselLayer, 10);
-    const z = Math.round((v.vesselLayer + 1) * vessel.layerMm);
-    lines(g, [[`layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈`, '#fff'], [`z ${z} mm · ${vessel.layerMm} mm spiral`, '#888'], [`${VESSEL_FACTS.clay}`, '#666']], textBox, s);
+    // The two pieces as installed: side by side at one scale, turning; the vessel grown to the playhead.
+    const tf = termite ? termiteFrame(termite, 0) : null, vf = vessel ? vesselFrame(vessel) : null;
+    const mmPerUnit = termite ? FAB_FACTS.termite.heightMm / (termite.bounds.maxY - termite.bounds.minY) : 1;
+    const te = tf ? stackExtent(tf) : null, ve = vf ? stackExtent(vf) : null;
+    const pair = pairLayout({ ...glyph, h: glyph.h - px * 1.6 }, te && { w: te.w * mmPerUnit, h: te.h * mmPerUnit }, ve, 10 * s);
+    if (termite && pair.termite) {
+        turningTermite(g, v.artifacts, 'card-termite', pair.termite, termite, v.now, 0.7);
+        text(g, `≈ ${FAB_FACTS.termite.heightMm / 10} cm`, pair.termite.x + pair.termite.w / 2, glyph.y + glyph.h - px * 1.3, px, '#999', 'center');
+    }
+    if (vessel && pair.vessel) {
+        grownVessel(g, v.artifacts, 'card-vessel', pair.vessel, vessel, v.vesselLayer, v.now, 0.7);
+        text(g, `${Math.round(vessel.heightMm)} mm`, pair.vessel.x + pair.vessel.w / 2, glyph.y + glyph.h - px * 1.3, px, '#999', 'center');
+    }
+    lines(g, [
+        [termite ? `termite form · PLA · ${termite.segments.length} printed segments` : 'termite form · link termite_slices.bin', '#bbb'],
+        [vessel ? `clay vessel beside it · layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈` : 'vessel · link vessel.gcode', '#888'],
+        ['side by side, to scale · made before the show', '#555'],
+    ], textBox, s);
 }
 
 function drawSound(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, live = v.live, { glyph, textBox } = cardParts(b, s, 3);
+    const s = v.scale, live = v.live, sv = live.sound, { glyph, textBox } = cardParts(b, s, 3);
+    if (sv.source === 'patch' && v.patch) {
+        // The pass's activity and flags over the chord strip; the chord, large, at the right.
+        const nameW = Math.min(glyph.w * 0.3, 74 * s), left: Box = { ...glyph, w: glyph.w - nameW - 8 * s };
+        activityStrip(g, { ...left, h: left.h * 0.6 }, v.patch, v.range, sv.heardIndex, s);
+        chordStrip(g, { ...left, y: left.y + left.h * 0.68, h: left.h * 0.32 }, sv.chordStep, s);
+        chordName(g, { x: left.x + left.w + 8 * s, y: glyph.y, w: nameW, h: glyph.h }, sv, s);
+        const r = sv.rates, telemetry = sv.chordSource === 'live' || r.tones.live || r.grains.live || r.kick.live;
+        lines(g, [
+            ['Max reads activity + burst flags at /index', '#bbb'],
+            [`tones ${rateText(r.tones, 1)} · grains ${rateText(r.grains, 0)} · kick ${rateText(r.kick)}`, '#888'],
+            [telemetry ? 'LIVE · from the patch' : `PATCH RULES${sv.chordSource === 'computed' ? ' · chord ≈' : ''}`, telemetry ? '#fff' : '#777'],
+        ], textBox, s);
+        return;
+    }
     rateLine(g, { ...glyph, y: glyph.y + glyph.h * 0.15, h: glyph.h * 0.7 }, live.rateHistory, live.rateHead, live.peak);
     lines(g, [
-        ['Max reads the matrix at /index', '#bbb'],
+        [v.patch ? 'no patch data at this /index: ≈ from spikes' : 'patch data not linked: ≈ from spikes', '#bbb'],
         [`rate ${Math.round(live.rate)}/100 ms · ${live.burst.inBurst ? 'BURST' : 'quiet'} · ends ${live.burst.ends}`, '#888'],
         [live.rateSource === 'live' ? 'LIVE · from the patch' : SOUND_FACTS.badge, live.rateSource === 'live' ? '#fff' : '#555'],
     ], textBox, s);
@@ -208,20 +237,19 @@ function drawSolenoids(g: G, b: Box, v: DrawInput) {
     strikers(g, glyph, live.strikeGlow);
     lines(g, [
         [`${live.backboneSlots.length} backbone of ${live.neurons.length || '—'}`, '#aaa'],
-        ['spike → strike', '#777'],
-        [live.strikeSource === 'live' ? `LIVE · ${live.strikes} strikes` : `≈ computed · ${live.strikes} strikes`, live.strikeSource === 'live' ? '#fff' : '#555'],
+        ['Max → Daisy Seed · <27 bits>', '#777'],
+        strikeCaption(live.strikeSource, v.mode, live.strikes),
     ], textBox, s);
 }
 
 function drawRobot(g: G, b: Box, v: DrawInput) {
     const s = v.scale, live = v.live, { glyph, textBox } = cardParts(b, s, 4);
-    hangingArms(g, glyph, live.arms, s);
-    const anyLive = live.arms.some(a => a.live);
+    armsPanel(g, glyph, live.arms, s, { cone: true, labels: false });
     lines(g, [
-        [`VISITORS (proximity, touch) → ${ROBOT_FACTS.sensor} → ${ROBOT_FACTS.servo} 0–180°`, '#aaa'],
-        [`${live.arms.map(a => `${a.proximity.toFixed(1)} m${a.touch ? ' · touch' : ''}`).join(' · ')}`, '#777'],
-        ['→ serial → Max → sound', '#bbb'],
-        [anyLive ? 'LIVE · from the audio computer' : ROBOT_FACTS.badge, anyLive ? '#fff' : '#555'],
+        ['visitor → ultrasonic 0–100 cm → servo 0–180°', '#aaa'],
+        [live.arms.map(armPhaseText).join(' · '), '#888'],
+        ['arm 1 → Max: the arpeggio\'s pace', '#bbb'],
+        robotCaption(live.arms.some(armIsLive)),
     ], textBox, s);
 }
 
@@ -264,11 +292,12 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
         : [[rb.x + rb.w * 0.5, rb.y + rb.h], [rb.x + rb.w * 0.5, audioFrame.y + audioFrame.h + margin], [so.x + so.w * 0.5, audioFrame.y + audioFrame.h + margin], [so.x + so.w * 0.5, so.y + so.h]];
     g.strokeStyle = '#bdbdbd';
     g.setLineDash([4 * s, 4 * s]);
-    g.lineDashOffset = v.now / 30;
+    g.lineDashOffset = -v.now / 30; // flowing from the robot into Max, as the arrow points
     g.beginPath();
     loop.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
     g.stroke();
     g.setLineDash([]);
+    g.lineDashOffset = 0;
 
     drawCentre(g, l, v);
 
@@ -301,10 +330,10 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
         g.save();
         g.translate(corner[0], (loop[1][1] + corner[1]) / 2);
         g.rotate(-Math.PI / 2);
-        tag(g, 'sensors · serial', 0, 0, px, '#888');
+        tag(g, 'arm 1 → arpeggio', 0, 0, px, '#888');
         g.restore();
     } else {
-        tag(g, 'sensors · serial', (loop[1][0] + corner[0]) / 2, corner[1], px, '#888');
+        tag(g, 'arm 1 → arpeggio', (loop[1][0] + corner[0]) / 2, corner[1], px, '#888');
     }
     g.restore();
 }

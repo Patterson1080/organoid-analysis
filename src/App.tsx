@@ -18,12 +18,18 @@ import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
 import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
 import { spikesBetween } from './show/showMath';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledFrame';
-import type { LedFrame } from './show/ledFrame';
 import { parseFiringBlob } from './show/routing/firingBlob';
+import { queueLedFrame } from './show/routing/live';
+import type { StampedLedFrame } from './show/routing/live';
 import type { FiringBlob } from './show/routing/firingBlob';
+import { patchData } from './show/routing/maxPatch';
+import type { PatchData } from './show/routing/maxPatch';
 import { consumeRoutingOsc, createTelemetry } from './show/routing/telemetry';
+import { parseTermiteSlices } from './show/routing/termiteSlices';
+import type { TermiteSlices } from './show/routing/termiteSlices';
 import { parseVesselGcode } from './show/routing/vessel';
 import type { Vessel } from './show/routing/vessel';
+import { parseWav16 } from './show/routing/wav';
 import { parseNeuronCSV, parseSpikeCSV } from './utils/dataProcessing';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
 
@@ -148,12 +154,15 @@ function App() {
     // handleShowState callback; and the last show index whose spikes were emitted.
     const emitFrameOutputsRef = useRef<(spikesInFrame: SpikeEvent[], frameTime: number) => void>(() => {});
     const lastShowIndexRef = useRef<number | null>(null);
-    // The routing view's inputs: the last LED frame emitFrameOutputs computed (sent or not), the
-    // audio computer's /routing/* telemetry, and the optional data/ files it draws from.
-    const lastLedFrameRef = useRef<LedFrame | null>(null);
+    // The routing view's inputs: every LED frame emitFrameOutputs computes (sent or not), queued for
+    // it to drain at its own rate, the audio computer's /routing/* telemetry, and the optional data/
+    // files it draws from.
+    const ledFramesRef = useRef<StampedLedFrame[]>([]);
     const routingTelemetryRef = useRef(createTelemetry());
     const [firingBlob, setFiringBlob] = useState<FiringBlob | null>(null);
     const [vessel, setVessel] = useState<Vessel | null>(null);
+    const [patch, setPatch] = useState<PatchData | null>(null);
+    const [termite, setTermite] = useState<TermiteSlices | null>(null);
     const showRunning = !!showState?.running;
     const showOn = showRunning && showState?.phase === 'on';
 
@@ -517,6 +526,15 @@ function App() {
                 fetch(`${base}/vessel.gcode`).then(r => r.text()).then(t => setVessel(parseVesselGcode(t)))
                     .catch(e => console.warn('data/vessel.gcode:', e));
             }
+            if (status.activity && status.bursts) {
+                const wav = (name: string) => fetch(`${base}/${name}`).then(r => r.arrayBuffer()).then(parseWav16);
+                Promise.all([wav('activitylevel.wav'), wav('burstflags.wav')]).then(([activity, bursts]) => setPatch(patchData(activity, bursts)))
+                    .catch(e => console.warn('data/activitylevel.wav + burstflags.wav:', e));
+            }
+            if (status.termite) {
+                fetch(`${base}/termite_slices.bin`).then(r => r.arrayBuffer()).then(b => setTermite(parseTermiteSlices(b)))
+                    .catch(e => console.warn('data/termite_slices.bin:', e));
+            }
             if (!status.neurons && !status.spikes) return;
             setBridgeDataStatus('Loading data/ from the bridge…');
             if (status.neurons && neurons.length === 0) handleNeuronsLoaded(await parseNeuronCSV(await fetchCsv('neurons.csv')));
@@ -763,7 +781,7 @@ function App() {
             neuronBoundsRef.current,
         );
         recentFiringNeuronsRef.current = trail;
-        if (frame) lastLedFrameRef.current = frame;
+        if (frame) queueLedFrame(ledFramesRef.current, frame, performance.now());
 
         // Play sound for spikes in this frame
         if (soundEnabled && spikesInFrame.length > 0) {
@@ -1440,10 +1458,12 @@ function App() {
                                 presentation={presentation}
                                 neurons={neurons}
                                 playbackTimeRef={playbackTimeRef}
-                                ledFrameRef={lastLedFrameRef}
+                                ledFramesRef={ledFramesRef}
                                 telemetryRef={routingTelemetryRef}
                                 firingBlob={firingBlob}
                                 vessel={vessel}
+                                patch={patch}
+                                termite={termite}
                             />
                         </div>
                     )}

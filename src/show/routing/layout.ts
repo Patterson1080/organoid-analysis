@@ -40,6 +40,10 @@ export const typeScale = (w: number, h: number) => Math.min(1.8, Math.max(0.85, 
 
 export const fontPx = (base: number, scale: number) => Math.max(8, Math.round(base * scale));
 
+export const isLandscape = (w: number, h: number) => w / h >= LANDSCAPE_RATIO;
+
+export const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+
 /** Split [start, start + span] into parts by `shares`, with `gap` between them: [start, length] each. */
 function split(start: number, span: number, shares: number[], gap: number): [number, number][] {
     const free = span - gap * (shares.length - 1);
@@ -51,11 +55,17 @@ function split(start: number, span: number, shares: number[], gap: number): [num
     });
 }
 
+/** Split a box into `n` equal boxes side by side with `gap` between them. */
+export function row(b: Box, n: number, gap: number): Box[] {
+    const w = (b.w - gap * (n - 1)) / n;
+    return Array.from({ length: n }, (_, i) => ({ x: b.x + i * (w + gap), y: b.y, w, h: b.h }));
+}
+
 export function routingLayout(w: number, h: number): RoutingLayout {
     const scale = typeScale(w, h);
     const m = 12 * scale, g = 10 * scale, band = 16 * scale;
     const cx = w / 2, cy = h / 2;
-    const landscape = w / h >= LANDSCAPE_RATIO;
+    const landscape = isLandscape(w, h);
     const r = landscape ? Math.min(0.42 * h, 0.16 * w) : Math.min(0.16 * h, 0.42 * w);
     const cards = {} as Record<MediumKey, Box>;
     let audioFrame: Box;
@@ -78,7 +88,7 @@ export function routingLayout(w: number, h: number): RoutingLayout {
 export function detailLayout(w: number, h: number): DetailLayout {
     const scale = typeScale(w, h);
     const m = 12 * scale, g = 10 * scale;
-    const landscape = w / h >= LANDSCAPE_RATIO;
+    const landscape = isLandscape(w, h);
     const header: Box = { x: m, y: m, w: w - 2 * m, h: 36 * scale };
     const railH = Math.max(64, 0.16 * h);
     const rail: Box = { x: m, y: h - m - railH, w: w - 2 * m, h: railH };
@@ -103,9 +113,6 @@ export function detailLayout(w: number, h: number): DetailLayout {
 
 /** The key of the first box containing (x, y), or null. */
 export function hitBox<K extends string>(boxes: Record<K, Box>, x: number, y: number): K | null {
-    for (const k of Object.keys(boxes) as K[]) {
-        const b = boxes[k];
-        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return k;
-    }
+    for (const k of Object.keys(boxes) as K[]) if (inside(boxes[k], x, y)) return k;
     return null;
 }

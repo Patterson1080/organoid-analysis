@@ -5,7 +5,7 @@
 import type { SpikeEvent } from '../../types';
 import { SOUND_FACTS } from './facts.ts';
 
-export const RATE_WINDOW_MS = 100;
+const RATE_WINDOW_MS = 100;
 /** A burst is a population rate at or above this share of the recording's peak. */
 export const BURST_FRACTION = 0.2;
 

@@ -13,19 +13,39 @@ const state: ShowState = {
 };
 
 test('follows the show clock while the show runs and the bridge is there', () => {
-    assert.deepEqual(routingPlayhead({ state, receivedAt: 0 }, true, 42, true, 500), { index: 130, phase: 'on', mode: 'show', offRemainingMs: 0 });
+    assert.deepEqual(routingPlayhead({ state, receivedAt: 0 }, true, 42, true, 500), { index: 130, phase: 'on', mode: 'show', offRemainingMs: 0, pass: 1, range: { start: 0, end: 179999 }, fps: 60, config: state.config });
 });
 
 test('OFF has no index and counts down', () => {
     const off = { ...state, phase: 'off' as const, index: null, phaseElapsedMs: 30_000, phaseDurationMs: 120_000 };
-    assert.deepEqual(routingPlayhead({ state: off, receivedAt: 0 }, true, 42, true, 1000), { index: null, phase: 'off', mode: 'show', offRemainingMs: 89_000 });
+    assert.deepEqual(routingPlayhead({ state: off, receivedAt: 0 }, true, 42, true, 1000), { index: null, phase: 'off', mode: 'show', offRemainingMs: 89_000, pass: 1, range: { start: 0, end: 179999 }, fps: 60, config: state.config });
 });
 
 test('a dropped bridge falls back to local playback', () => {
-    assert.deepEqual(routingPlayhead({ state, receivedAt: 0 }, false, 42, true, 500), { index: 42, phase: 'stopped', mode: 'local', offRemainingMs: 0 });
+    assert.deepEqual(routingPlayhead({ state, receivedAt: 0 }, false, 42, true, 500), { index: 42, phase: 'stopped', mode: 'local', offRemainingMs: 0, pass: 1, range: { start: 0, end: 179999 }, fps: null, config: state.config });
 });
 
 test('no show and no data: no playhead', () => {
-    assert.deepEqual(routingPlayhead(null, true, 42, false, 500), { index: null, phase: 'stopped', mode: 'local', offRemainingMs: 0 });
+    assert.deepEqual(routingPlayhead(null, true, 42, false, 500), { index: null, phase: 'stopped', mode: 'local', offRemainingMs: 0, pass: 1, range: { start: 0, end: 179999 }, fps: null, config: null });
     assert.equal(routingPlayhead(null, true, 42, true, 500).index, 42);
+});
+
+test('the show playhead carries pass and range', () => {
+    const second = { ...state, pass: 2, config: { ...state.config, startIndex: 100, endIndex: 900 } };
+    const p = routingPlayhead({ state: second, receivedAt: 0 }, true, 42, true, 500);
+    assert.equal(p.pass, 2);
+    assert.deepEqual(p.range, { start: 100, end: 900 });
+});
+
+test('local playback is pass 1 over the whole recording', () => {
+    const p = routingPlayhead(null, true, 42, true, 500);
+    assert.equal(p.pass, 1);
+    assert.deepEqual(p.range, { start: 0, end: 179999 });
+});
+
+test("the show playhead carries the bridge's index rate, which the operator sets", () => {
+    const slow = { ...state, config: { ...state.config, fps: 30 } };
+    const p = routingPlayhead({ state: slow, receivedAt: 0 }, true, 42, true, 1000);
+    assert.equal(p.fps, 30);
+    assert.equal(p.index, 130); // 100 + 1 s at 30 /s
 });

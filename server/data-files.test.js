@@ -10,7 +10,7 @@ await writeFile(path.join(dir, 'neurons.csv'), 'backbone_labels,xy_norm_0,xy_nor
 await writeFile(path.join(dir, 'vessel.gcode'), 'G1 X0 Y0 Z0\n');
 
 test('status lists every data file', () => {
-    assert.deepEqual(dataStatus(dir), { neurons: true, spikes: false, firing: false, vessel: true });
+    assert.deepEqual(dataStatus(dir), { neurons: true, spikes: false, firing: false, vessel: true, activity: false, bursts: false, termite: false });
 });
 
 test('routes carry their content type', () => {
@@ -20,5 +20,12 @@ test('routes carry their content type', () => {
 });
 
 test('status keys keep their order', () => {
-    assert.equal(Object.keys(dataStatus(dir)).join(), 'neurons,spikes,firing,vessel');
+    assert.equal(Object.keys(dataStatus(dir)).join(), 'neurons,spikes,firing,vessel,activity,bursts,termite');
+});
+
+test('the WAVs are served as audio/wav', () => {
+    const routes = dataRoutes(dir);
+    assert.equal(routes.get('/data/activitylevel.wav').type, 'audio/wav');
+    assert.equal(routes.get('/data/burstflags.wav').type, 'audio/wav');
+    assert.equal(routes.get('/data/termite_slices.bin').type, 'application/octet-stream');
 });

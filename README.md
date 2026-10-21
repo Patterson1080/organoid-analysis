@@ -255,11 +255,21 @@ ln -s ~/Developer/Fabrication/PDE_SimulacraNaturae/data/organoid/time_series_dat
 
 The bridge reads both at startup (about a second for the 612 MB matrix) and serves them to the page (`http://127.0.0.1:8080/data/`, local pages only), which loads them on connect when nothing was uploaded. A manual upload still works for other datasets. `data/` is gitignored.
 
-Two optional files feed the routing view in the SHOW panel: EoC's firing blob (the normalized rates EoC actually reads) and the vessel's G-code. Without them the Visual card falls back to spikes and the Fabrication card says the G-code is missing.
+Optional files feed the routing view in the SHOW panel. Each card falls back without its file, and says so.
+
+| File | What it is | Card |
+|---|---|---|
+| `organoid_firing.f16` | EoC's firing blob: the normalized rates EoC actually reads | Visual (else spikes) |
+| `vessel.gcode` | the vessel's G-code | Fabrication |
+| `activitylevel.wav`, `burstflags.wav` | the sound patch's own data buffers, read at each `/index` | Sound (else ≈ from spikes) |
+| `termite_slices.bin` | the termite form's print-layer contours, made from its mesh | Fabrication |
 
 ```bash
 ln -s ~/Developer/Graphics/EoC-biomes-compute/Assets/StreamingAssets/biomes11/organoid_firing.f16 data/organoid_firing.f16
 ln -s ~/Developer/Fabrication/PDE_SimulacraNaturae/data/gcodes/single-object-436666.gcode data/vessel.gcode
+ln -s ~/Professional/Metaesthetica/dev/audio/activitylevel.wav data/activitylevel.wav
+ln -s ~/Professional/Metaesthetica/dev/audio/burstflags.wav data/burstflags.wav
+node scripts/termite-slices.mjs ~/Professional/Metaesthetica/dev/termites/Final_Scaled_Artifact.obj   # ≈ 1 min → data/termite_slices.bin (0.55 MB)
 ```
 
 Incoming `/routing/*` OSC (the audio computer's telemetry for the routing view) isn't logged by the bridge.
@@ -275,16 +285,16 @@ The organoid sits in the centre, lit by its spikes on the playhead (the show's `
 | Card | Signal → medium | Source |
 |---|---|---|
 | Visual · EoC-biomes | `/index` over OSC :1234 selects a row of EoC's firing blob, the normalized rates. A neuron at ≥ 0.1 excites its agents in physarum (1M), boids (20k) and termites (131): speed and deposit. Firing termites stamp Dispersal, which the others flee. | the blob itself, when `data/organoid_firing.f16` is linked; else spikes (the card says so) |
-| LED | `ledStep` → `SERIAL_SYNC` → `F:x,y` / `C:x,y` (≤ 10 a frame, 115200) → two 16×16 matrices → fiber optics | exact: the frame the page computed last |
-| Fabrication | the vessel was grown from this recording before the show; the card shows the layer grown at this point of the recording | the real G-code (`data/vessel.gcode`), layer ≈ linear in the index |
+| LED | `ledStep` → `SERIAL_SYNC` → `F:x,y` / `C:x,y` (≤ 10 a frame, 115200) → two 16×16 matrices → fiber optics | exact: every frame the page computes |
+| Fabrication | both central artifacts, made before the show, drawn as their print layers and turning, side by side at one scale as installed: the termite form (PLA, 4 printed segments, ≈ 70 cm, from the same 131 agents: 100³ lattice → point cloud → Poisson surface) beside the clay vessel (452 mm), grown to the layer at this point of the recording. The detail alternates the whole form with its segments under a print preview; a schematic shows the frame, LED matrices and fibres. | the mesh's slices (`data/termite_slices.bin`) and the real G-code (`data/vessel.gcode`), layer ≈ linear in the index |
 
 The audio computer's Max patch handles the other three:
 
 | Card | Signal → medium | Source |
 |---|---|---|
-| Sound | `/index` over OSC; the patch reads the matrix, and population rate and burst ends drive density and harmonic changes (SIGGRAPH 2026). The tone, grain and kick mappings shown are VISAP 2025's. | ≈ computed from spikes |
-| Solenoids | 27 backbone neurons → 27 strikers in the vessels and glassware | ≈ computed from backbone spikes |
-| Robot | three arms hung upside down; visitor proximity and touch move the servos and go to Max over serial, into the sound | SIMULATED until telemetry arrives |
+| Sound | `/index` over OSC. Max reads its activity level `a` and burst flags at that index (`SimulacraNaturae_4ch_realtime.maxpat`): √a paces the guitar tones (50–4800 ms), a^⅛ the grains (6.25–200 ms, quiet = dense), `a` the sub kick (1200–9600 ms, silence holds; half the kicks are gated silent, the rest play on speakers 3–4). Each of the 46 flags steps a 17-chord progression. Voices land on 16 positions over speakers 3–6. Arm 1's distance paces an arpeggio on 1–2 (`SimulacraNaturaeSerialComsCurrents.maxpat`). The detail plays the voices forward at the patch's rates and odds while `/index` flows; with the recording stopped nothing triggers. | the patch's rules on its own data when the WAVs are linked: the chord ≈ in the show (counted from pass 1), unknown in local playback; else ≈ from spikes with the papers' ranges |
+| Solenoids | `/index` → line index + 1 of `backboneSpikes.txt` (the 27 backbone columns) → `<27 digits>` at 9600 baud → a Daisy Seed → 27 strikers in the vessels and glassware; all off 32 ms after the last line | the rows Max sends, in the show; ≈ in local playback, which sends few rows |
+| Robot | arms hung upside down from a pipe: a carbon spine with vertebrae and mylar leaves, a tendon the servo pulls, an ultrasonic sensor at the tip. The firmware's rule (`ProximityServoArms_Currents.ino`, and the modular rebuild's `currents` mode): distance 0–100 cm (100 = nobody) → angle `map(d, 0, 100, 0, 180)`, moved only past a 10° deadband at 200°/s, then a 2 s rest. Arm 1's distance paces the sound's arpeggio. | LIVE from the modular arms' `/routing/robot/1-3/…` mirror; else SIMULATED: the same rules with stand-in visitors |
 
 **Using it:**
 - **Details:** tap or click a card for its detail: the story drawn large, the signal chain with live values, and a rail of all six to step between. `× ROUTING`, or a tap on the story, returns to the overview.
@@ -292,16 +302,20 @@ The audio computer's Max patch handles the other three:
 - **Operator controls** (hidden in ⛶ PRESENT): show/hide, tour on/off, and **VISUAL OUT**, which picks what happens to Unity's output this show (direct, TouchDesigner projection mapping, or mapping plus StreamDiffusion). They're kept per browser.
 - **Presentation:** the routing view takes the rest of the screen below the timeline, in any shape. Landscape screens put the bridge-fed media left of the organoid and the audio computer right; portrait screens stack them above and below.
 
-**Telemetry from the audio computer** (not sent yet). The cards switch to **LIVE** when Max sends these to the show machine's OSC input (UDP 3333), and fall back after 2 s of silence. The bridge doesn't log them.
+**Telemetry** (optional). The cards switch to **LIVE** when these reach the show machine's OSC input (UDP 3333, any interface), and fall back after 2 s of silence. The bridge doesn't log them.
 
 | Address | Args |
 |---|---|
 | `/routing/sound/rate` | float: spikes per 100 ms, the unit the card computes in |
 | `/routing/sound/burst` | 0/1 |
-| `/routing/sound/harmony` | int: the harmonic step |
+| `/routing/sound/harmony` | int: the chord counter's step, 0–17 (0 holds K) |
 | `/routing/sound/tones` · `/grains` · `/kick` | float: events/s |
 | `/routing/solenoid` | slot 0–26 (the k-th backbone neuron in `neurons.csv` row order) [, velocity 0–1] |
 | `/routing/robot/<1-3>/proximity` (cm) · `/servo` (°) · `/touch` (0/1) | float |
+
+**Max side.**
+- **Exact chord:** in `SimulacraNaturae_4ch_realtime.maxpat`, connect `[counter 17]`'s left outlet to `[prepend /routing/sound/harmony]` → `[udpsend <show machine IP> 3333]`. Use `255.255.255.255 3333` where Max allows broadcast.
+- **Arms:** the modular arms (`dev/arms/modular`) already mirror arms 1–3 as `/routing/robot/<id>/…` to 3333. The CURRENTS sketch only prints serial lines to Max.
 
 ## Spout Output
 

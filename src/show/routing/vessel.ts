@@ -57,9 +57,15 @@ export function parseVesselGcode(text: string, pointsPerLayer = 200): Vessel {
     cx /= moves.length / 3;
     cy /= moves.length / 3;
 
+    // Layers are counted from where the toolpath starts: the exporter begins each closed turn half a
+    // layer up (Z0.75 for 1.6 mm), so bins from z = 0 would cut every turn in two and draw a chord
+    // across it. Moves below the bed drop out; the epsilon keeps 4.8 / 1.6 in layer 3.
+    let zMin = Infinity;
+    for (let i = 2; i < moves.length; i += 3) zMin = Math.min(zMin, moves[i]);
+    const z0 = Math.max(0, zMin);
     const byLayer: number[][] = [];
     for (let i = 0; i < moves.length; i += 3) {
-        (byLayer[Math.floor(moves[i + 2] / layerMm)] ??= []).push(moves[i] - cx, moves[i + 1] - cy);
+        (byLayer[Math.floor((moves[i + 2] - z0) / layerMm + 1e-6)] ??= []).push(moves[i] - cx, moves[i + 1] - cy);
     }
     const layers: VesselLayer[] = [];
     let maxRadius = 0;
@@ -69,7 +75,7 @@ export function parseVesselGcode(text: string, pointsPerLayer = 200): Vessel {
         const out = new Float32Array(n * 2);
         let radius = 0;
         for (let i = 0; i < n; i++) {
-            const k = Math.floor((i * have) / n) * 2;
+            const k = (i === n - 1 ? have - 1 : Math.floor((i * have) / n)) * 2; // keeps the turn's last point
             out[i * 2] = pts[k];
             out[i * 2 + 1] = pts[k + 1];
         }
@@ -90,5 +96,5 @@ export function layerForIndex(v: Vessel, index: number, frames = 180000): number
 /** How many layers were printed: all of them, or those below `printedMm` when the print stopped early. */
 export function printedLayers(v: Vessel, printedMm: number | null): number {
     if (printedMm === null) return v.layers.length;
-    return Math.min(v.layers.length, Math.max(0, Math.floor(printedMm / v.layerMm)));
+    return Math.min(v.layers.length, Math.max(0, Math.floor(printedMm / v.layerMm + 1e-6)));
 }

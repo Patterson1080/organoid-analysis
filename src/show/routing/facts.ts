@@ -2,6 +2,8 @@
 // Max patch or a file changes. Numbers are the running system's (the 11.3 scene, the vessel
 // G-code, the bridge); paper figures only where no file exists, labelled with their paper.
 
+import { LED_TRAIL_LENGTH } from '../ledFrame.ts';
+
 export type MediumKey = 'visual' | 'sound' | 'solenoids' | 'led' | 'robot' | 'fab';
 
 /** The artist's order of the media; the tour and the rail follow it. */
@@ -27,9 +29,7 @@ export const BACKBONE_COUNT = 27;
 
 /** Scene_BraveNewWork.unity and its 11.3 *Params.asset files. */
 export const VISUAL_FACTS = {
-    scene: 'Scene_BraveNewWork',
     port: 1234,
-    fps: 60,
     blob: 'organoid_firing.f16',
     threshold: 0.1,
     fadeS: 0.5,
@@ -49,8 +49,11 @@ export const VISUAL_OUTPUT_CHAINS: Record<VisualOutput, string[]> = {
     'td-sd': ['Unity', 'Spout/Syphon/NDI', 'TD projection mapping', '+ StreamDiffusion (TD)', 'projection'],
 };
 
-/** The patch isn't on this machine: the description is SIGGRAPH 2026's, the ranges VISAP 2025's. */
+/** The papers' description (SIGGRAPH 2026) and ranges (VISAP 2025), for when the patch's data
+ *  files aren't linked into data/; with them the view follows maxPatch.ts and these files. */
 export const SOUND_FACTS = {
+    patchFile: 'SimulacraNaturae_4ch_realtime.maxpat',
+    serialFile: 'SimulacraNaturaeSerialComsCurrents.maxpat',
     descriptionSource: 'SIGGRAPH 2026',
     rangesSource: 'VISAP 2025',
     tone: [0.21, 20.0] as [number, number],
@@ -64,15 +67,26 @@ export const SOUND_FACTS = {
 };
 
 /** src/show/ledFrame.ts and server/serial-bridge.js. */
-export const LED_FACTS = { trail: 5, burstOver: 5, perFrameCap: 10, baud: 115200, idleMs: 500 };
+export const LED_FACTS = { trail: LED_TRAIL_LENGTH, burstOver: 5, perFrameCap: 10, baud: 115200, idleMs: 500 };
 
+/** solenoidSerialCommunication.maxpat: /index → line index + 1 of the file → `<27 digits>` to the
+ *  board; all zeros 32 ms after the last line. The file isn't on this machine, so strikes stay ≈. */
+export const SOLENOID_FACTS = { file: 'backboneSpikes.txt', board: 'Daisy Seed', baud: 9600, releaseMs: 32 };
+
+/** The arms in this show: dev/arms/ProximityServoArms_Currents.ino on one board, read by Max over
+ *  serial; the modular rebuild (dev/arms/modular) mirrors arms 1–3 to the bridge as /routing/robot/…. */
 export const ROBOT_FACTS = {
     arms: 3,
-    sensor: 'HC-SR04',
-    servo: 'MG995',
-    range: [0, 180] as [number, number],
-    badge: 'SIMULATED · sensors go to the audio computer',
+    sketch: 'ProximityServoArms_Currents.ino',
+    rebuild: 'Haptophylla modular',
+    badge: "SIMULATED · the firmware's rules, stand-in visitors",
     dormant: '/inject/arm1..3 · off in this show',
+};
+
+/** SIGGRAPH 2026 §Biome III: the termite form, from the same agents as Biome I. */
+export const FAB_FACTS = {
+    termite: { material: 'PLA', lattice: '100³', source: 'SIGGRAPH 2026', heightMm: 700 }, // ≈ 70 cm as built (the team)
+    pipeline: '131 agents · 100³ lattice → point cloud → Poisson surface → 4 PLA segments',
 };
 
 /** The G-code's own header supplies layers, layer height, nozzle and size; these fill the rest. */

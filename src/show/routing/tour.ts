@@ -6,9 +6,9 @@ import { MEDIA } from './facts.ts';
 import type { MediumKey } from './facts.ts';
 
 export type TourStop = 'overview' | MediumKey;
-export const TOUR_STOPS: TourStop[] = ['overview', ...MEDIA];
-export const TOUR_DWELL_MS = 20_000;
-export const TOUR_IDLE_MS = 60_000;
+const TOUR_STOPS: TourStop[] = ['overview', ...MEDIA];
+const TOUR_DWELL_MS = 20_000;
+const TOUR_IDLE_MS = 60_000;
 
 export interface TourState {
     enabled: boolean;
@@ -20,6 +20,8 @@ export interface TourState {
 export const createTour = (now: number, enabled = true): TourState => ({ enabled, stop: 0, stopStartedAt: now, pausedUntil: null });
 
 export const tourPaused = (s: TourState, now: number): boolean => s.pausedUntil !== null && now < s.pausedUntil;
+
+export const tourActive = (s: TourState, now: number): boolean => s.enabled && !tourPaused(s, now);
 
 export const tourCurrent = (s: TourState): TourStop => TOUR_STOPS[s.stop];
 
@@ -38,6 +40,6 @@ export const setTourEnabled = (s: TourState, enabled: boolean, now: number): Tou
 
 /** How far through the current stop, 0..1; 0 while paused or off. */
 export function tourProgress(s: TourState, now: number): number {
-    if (!s.enabled || tourPaused(s, now)) return 0;
+    if (!tourActive(s, now)) return 0;
     return Math.min(1, Math.max(0, (now - s.stopStartedAt) / TOUR_DWELL_MS));
 }
