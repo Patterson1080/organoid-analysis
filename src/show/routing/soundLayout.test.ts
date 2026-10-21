@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activityEnvelope, soundPanels } from './soundLayout.ts';
+import { activityEnvelope, soundCaptions, soundPanels } from './soundLayout.ts';
 import type { Box } from './layout.ts';
 
 const EPS = 1e-9;
@@ -24,4 +24,13 @@ test("activity envelope keeps each column's peak", () => {
     const a = new Float32Array([0, 1, 0, 0.5]);
     assert.deepEqual(Array.from(activityEnvelope(a, 2, 0, 3)), [1, 0.5]);
     assert.deepEqual(Array.from(activityEnvelope(a, 1, 2, 3)), [0.5]);
+});
+
+test('captions say the draws are simulated, playing or held', () => {
+    for (const moving of [true, false]) {
+        const c = soundCaptions(moving);
+        assert.match(c.voices, /drawn like Max draws them/);
+        assert.match(c.output, /drawn like Max draws them/);
+    }
+    assert.match(soundCaptions(false).voices, /plays on at the last values/);
 });

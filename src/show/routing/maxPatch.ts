@@ -40,9 +40,10 @@ export function grainLenBins(a: number): [number, number] | null {
     return bin === null ? null : [bin, bin * 2];
 }
 
-/** One grain tick's odds: the LFO gate passes when L < random, then `random 100` must reach 10 + 80√a. */
+/** One grain tick's odds: the LFO gate passes when L < random, then `random 100` must reach
+ *  10 + 80√a, compared as ints (`[<]` has no float argument, so it truncates). */
 export function grainChance(a: number, lfo: number): number {
-    const reach = Math.max(0, 100 - Math.max(0, Math.ceil(10 + 80 * Math.sqrt(a))));
+    const reach = Math.max(0, 100 - Math.max(0, Math.trunc(10 + 80 * Math.sqrt(a))));
     return ((1 - Math.min(1, Math.max(0, lfo))) * reach) / 100;
 }
 
@@ -54,6 +55,10 @@ export function expectedKicks(p = 0.5, echoes = 3): number {
     for (let k = 0; k <= echoes; k++) sum += p ** k;
     return p * sum;
 }
+
+/** Kicks heard per tick: termiteKick's `random 2 → gate~ 2` has no `+ 1`, so 0 closes the gate on
+ *  half of them, and the rest go to out17 (speakers 3–4's centre); out18 never gets one. */
+export const audibleKicks = () => expectedKicks() * 0.5;
 
 /** `counter 17` after `flags` burst flags: set to 1 at load, one step per flag, 0 after 17. */
 export const chordStep = (flags: number) => (((1 + flags) % 18) + 18) % 18;

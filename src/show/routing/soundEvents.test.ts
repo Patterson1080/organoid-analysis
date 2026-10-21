@@ -35,7 +35,9 @@ test('kicks follow the decide chain', () => {
     assert.ok(Math.abs(byEcho[1] - 250) <= 40, `echo 1: ${byEcho[1]}`);
     assert.ok(Math.abs(byEcho[2] - 125) <= 30, `echo 2: ${byEcho[2]}`);
     assert.ok(Math.abs(byEcho[3] - 62) <= 22, `echo 3: ${byEcho[3]}`);
-    assert.ok(kicks.every(e => e.echo <= 3 && (e.position === 17 || e.position === 18)));
+    assert.ok(kicks.every(e => e.echo <= 3 && (e.position === 0 || e.position === 17)), 'out17 or gated silent; out18 never');
+    const heard = kicks.filter(e => e.position === 17).length;
+    assert.ok(Math.abs(heard - kicks.length / 2) <= 60, `${heard} of ${kicks.length} heard`);
 });
 
 test('a pending echo delay is rescheduled, not doubled', () => {

@@ -32,6 +32,14 @@ export function soundPanels(story: Box): { score: Box; rules: Box; harmony: Box;
     return { score, rules, harmony, output };
 }
 
+/** The VOICES and OUTPUT captions: whatever the playhead does, the picks shown are drawn here. */
+export function soundCaptions(moving: boolean): { voices: string; output: string } {
+    return {
+        voices: `${moving ? 'the last 10 s' : 'Max plays on at the last values'} · drawn like Max draws them`,
+        output: 'positions drawn like Max draws them',
+    };
+}
+
 /** The peak of each column's share of [start, end]. */
 export function activityEnvelope(activity: Float32Array, columns: number, start: number, end: number): Float32Array {
     const out = new Float32Array(Math.max(0, Math.floor(columns)));

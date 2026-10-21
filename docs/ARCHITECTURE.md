@@ -65,7 +65,7 @@ data/organoid_firing.f16, vessel.gcode, ─┤          (src/show/routing/live.t
 - `maxPatch.ts`: the sound patch's own rules, from `dev/audio/*.maxpat`.
   - **Tables:** tone, grain and kick intervals; grain length and odds; kick echoes; the 17-step chord counter with its notes; arm 1's arpeggio interval.
   - **`PatchData`:** the activity and flags, with hold-aware intervals: a table miss keeps the last value, as Max does.
-- `soundEvents.ts`: the voices played forward in wall-clock time, at the patch's rates and odds, with a seeded generator. Covers tones, grains, kicks through Max's three echo `delay`s, 6 drones and the arpeggio, into a 4096-event ring.
+- `soundEvents.ts`: the voices played forward in wall-clock time, at the patch's rates and odds, with a seeded generator. Covers tones, grains, kicks through Max's three echo `delay`s and its half-closed output gate, 6 drones and the arpeggio, into a 4096-event ring.
 - `soundLayout.ts`: the SOUND detail's panels; the activity envelope per pixel column.
 - `slicer.ts` · `termiteSlices.ts`: mesh → horizontal contours (chained, RDP-simplified) → `TSL1`, per print segment. `scripts/termite-slices.mjs` runs them on the OBJ.
 - `sliceView.ts`: both artifacts as layer stacks (vessel layers, termite slices with exploded segments), the turntable projection, slice stride and depth alpha, the FAB panels.

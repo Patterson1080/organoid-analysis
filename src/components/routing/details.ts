@@ -6,16 +6,15 @@ import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, MEDIA, ROBOT_FACTS, SOL
 import type { MediumKey } from '../../show/routing/facts';
 import type { Box, DetailLayout } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
-import { expectedKicks } from '../../show/routing/maxPatch';
 import type { PatchData } from '../../show/routing/maxPatch';
 import { paperMappings } from '../../show/routing/soundFeatures';
 import { fabPanels } from '../../show/routing/sliceView';
-import { soundPanels } from '../../show/routing/soundLayout';
+import { soundCaptions, soundPanels } from '../../show/routing/soundLayout';
 import { printedLayers } from '../../show/routing/vessel';
 import { MONO, arrowHead, clipTo, fitSquare, frame, hangingArms, ledGrid, lines, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
 import type { G } from './glyphs';
 import { firingCount, row } from './overview';
-import { activityStrip, grainsPerSecond, harmony, perSecond, rules, score, speakers } from './soundGlyphs';
+import { activityStrip, harmony, rateText, rules, score, speakers } from './soundGlyphs';
 import { CLAY_RGB, TERMITE_RGB, TURN_MS, cachedDraw, drawStack, planView, schematic, termiteFrame, termiteLayers, vesselFrame, vesselLayers } from './artifactGlyphs';
 import type { DrawInput, SwarmKey } from './overview';
 
@@ -139,8 +138,7 @@ function bar(g: G, b: Box, t: number, label: string, s: number) {
 /** The patch at the playhead: the voices as they play, the rules that pace them, the chord, the speakers. */
 function soundFromPatch(g: G, l: DetailLayout, v: DrawInput, patch: PatchData) {
     const s = l.scale, sv = v.live.sound, p = soundPanels(storyTop(l)), px = fontPx(9, s);
-    const playing = v.live.moving ? 'the last 10 s, drawn like Max draws them' : 'Max plays on at the last values';
-    text(g, `VOICES · ${playing}`, p.score.x, p.score.y, px, '#ddd');
+    text(g, `VOICES · ${soundCaptions(v.live.moving).voices}`, p.score.x, p.score.y, px, '#ddd');
     const strip: Box = { x: p.score.x, y: p.score.y + px * 1.6, w: p.score.w, h: Math.max(8, p.score.h * 0.14) };
     activityStrip(g, strip, patch, v.range, sv.heardIndex, s);
     const below = strip.y + strip.h + 6 * s;
@@ -152,7 +150,7 @@ function soundFromPatch(g: G, l: DetailLayout, v: DrawInput, patch: PatchData) {
         [`/index ${v.index === null ? '——————' : pad6(v.index)}`, 'OSC → audio computer'],
         ['peek~ activity · flags', `v ${sv.v.toFixed(3)} · flag ${sv.flagsSoFar}`],
         ['a = v / 0.9668', sv.a.toFixed(3)],
-        ['tones · grains · kick', `${perSecond(sv.toneMs).toFixed(1)} · ${grainsPerSecond(sv).toFixed(0)} · ${(perSecond(sv.kickMs) * expectedKicks()).toFixed(2)} /s`],
+        ['tones · grains · kick', `${rateText(sv.rates.tones, 1)} · ${rateText(sv.rates.grains, 0)} · ${rateText(sv.rates.kick)}`],
         ['speakers 3–6', 'arpeggio 1–2'],
     ], s);
 }

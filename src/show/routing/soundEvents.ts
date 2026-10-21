@@ -9,7 +9,7 @@ export interface SoundEvent {
     at: number; // tick time, ms on the caller's clock
     pc: number; // pitch class 0..11; −1 for kicks
     octave: number; // arp: 3 | 4 | 5; kick: 1; else 0
-    position: number; // 0 unrouted, 1..16 out1..16; kick 17 | 18; arp −1 (its own pair)
+    position: number; // 0 unrouted, 1..16 out1..16; kick 17 (speakers 3–4's centre); arp −1 (its own pair)
     speed: number; // grain playback ×1..×64, else 1
     echo: number; // kick 0..3, else 0
 }
@@ -120,8 +120,9 @@ function metro(clock: number, interval: number | null, dt: number, now: number, 
     return c;
 }
 
+/** termiteKick's `random 2 → gate~ 2`: 0 closes the gate (silent), 1 sends it to out17. */
 function kick(sim: SoundSim, at: number, echo: number) {
-    push(sim, event('kick', at, { octave: 1, position: 17 + randInt(sim, 2), echo }));
+    push(sim, event('kick', at, { octave: 1, position: randInt(sim, 2) === 0 ? 0 : 17, echo }));
 }
 
 /** Kick ticks and due echo delays, in time order; a delay due at a tick's time fires first. */

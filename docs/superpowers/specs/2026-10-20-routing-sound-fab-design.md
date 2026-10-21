@@ -84,11 +84,11 @@ Read for this design:
 |---|---|
 | **Chords** | **Counter:** `counter 17` counts 0…17. At load it is set to 1 and outputs it: `[msg 1]` goes to the right-middle inlet, "set and output immediately". Each flag bangs it to the next count. **`coll chords`:** keys 1–17 → A B A B C D C D E F E F G H I J K. Count 0 has no key, so K holds. Step after N flags = (1 + N) mod 18; chord = step 0 ? K : step. **`coll notes`:** gives each step's 5 notes (semitones from C), in the table below. |
 | **Tones** | **Interval:** k = trunc(12 − 11√a) → [50, 100, 200, 300, 400, 600, 800, 1200, 1600, 2400, 3200, 4800][k−1] ms. **Per tick:** a random sample 1–5 of the current chord goes to `poly~ neuralGuitarB 256`. |
-| **Grains** | **Tick:** k = trunc(1 + 5·a^⅛) → [6.25, 12.5, 25, 50, 100, 200][k−1] ms. Quiet means fast: 160 ticks/s at a = 0. **Length:** k = trunc(1 + 5·a^¼) → the same bins, then a coin flip keeps the bin or doubles it (max 400). **Playback:** the grain plays the sample's first 400 ms over its length, so speed = 400 / length (×1…×64). **Chance per tick:** (1 − L) · (100 − ⌈10 + 80√a⌉) / 100. L is a 0.007984 Hz LFO (≈125 s) whose phase is unknown. **Envelope:** a triangle peaking at √a of the grain. Voice: `poly~ neuralGuitarC 128`. |
+| **Grains** | **Tick:** k = trunc(1 + 5·a^⅛) → [6.25, 12.5, 25, 50, 100, 200][k−1] ms. Quiet means fast: 160 ticks/s at a = 0. **Length:** k = trunc(1 + 5·a^¼) → the same bins, then a coin flip keeps the bin or doubles it (max 400). **Playback:** the grain plays the sample's first 400 ms over its length, so speed = 400 / length (×1…×64). **Chance per tick:** (1 − L) · (100 − ⌊10 + 80√a⌋) / 100 (`[<]` has no float argument, so it compares as ints). L is a 0.007984 Hz LFO (≈125 s) whose phase is unknown. **Envelope:** a triangle peaking at √a of the grain. Voice: `poly~ neuralGuitarC 128`. |
 | **Kick** | **Interval:** k = trunc(7 − 6a) → [1200, 1600, 2400, 3200, 6400, 9600][k−1] ms. a = 0 gives k = 7, which holds. Outlet 4 also wires 4800, but Max sends right-to-left by box position, so 3200 lands last. **Per tick:** 50 % chance of a kick; then up to 3 echoes at +1200 ms, each 50 %. That is 0.9375 kicks per tick expected. **Sound:** a sine at C1 32.70 Hz or D♭1 34.65 Hz (random), 5 ms attack, 6 s decay. |
 | **Drones** | 6 voices. Each voice: 1. plays a random chord sample into `fzero~` (not to the speakers); 2. 1 s later a sine takes the detected pitch; 3. envelope (line²) rises over T, falls over T, rests for T, with T random in 5–10 s; ×0.1. |
 | **Arpeggio** (serial patch) | **Input:** the arm Arduino prints `sensordata: <id>,<cm>` (HC-SR04-style echo, 0–100 cm, 100 when nothing is in range) at 115200 baud. Only id 1 drives the arpeggio; id 2 is displayed in Max; id 3 isn't read. **Interval:** 15 + 1000·(d/100)² ms: 1015 ms with nobody near, 265 ms at 50 cm, 25 ms at 10 cm. int(d) = 0 stops it. **Notes:** steps up through the current 5 notes (`r currentNotes`), each at MIDI 48, 60 or 72 (random) + note. A sine with 5 ms attack, decaying over the interval, through a reverb. |
-| **Output** | **Positions:** tones, grains and drones each pick `random 17 → gate~ 16`, which is out1–16; position 0 (1 in 17) is silent. out1–8 go through `mc.pack~ 9 → mc.stereo~` at pans 0, 1/7 … 1 to speakers 3–4. out9–16 do the same to speakers 5–6. **Kick:** out17 or out18 (random), at pan 0.5 of pair A or B. **Arpeggio:** speakers 1–2. |
+| **Output** | **Positions:** tones, grains and drones each pick `random 17 → gate~ 16`, which is out1–16; position 0 (1 in 17) is silent. out1–8 go through `mc.pack~ 9 → mc.stereo~` at pans 0, 1/7 … 1 to speakers 3–4. out9–16 do the same to speakers 5–6. **Kick:** `random 2 → gate~ 2` has no `+ 1`, so half the kicks are gated silent. The rest go to out17 at pan 0.5 of pair A (speakers 3–4); out18 never gets a kick. **Arpeggio:** speakers 1–2. |
 
 `coll notes` (semitones from C), by step 1–17:
 
@@ -448,6 +448,8 @@ The page under test must never connect to `127.0.0.1:8080/8081`. Visual checks u
 - Does anything fade the sound in OFF? `r cueAudio` has no sender in the patches given.
 - Is `backboneSpikes.txt` the 27 backbone columns of `spikes.csv`?
 - Should Max send `/routing/sound/harmony` (counter 0–17) to make the chord exact?
+- Is `termiteKick`'s `random 2 → gate~ 2` without `+ 1` intended? Half the kicks are silent, and speakers 5–6 never get one.
+- The tone and kick `metro`s have no interval argument. Until the first usable activity value after Max loads, they tick at Max's default. Should they be `metro 4800` and `metro 9600`?
 
 ## Amendments (during the build)
 
@@ -460,3 +462,8 @@ The page under test must never connect to `127.0.0.1:8080/8081`. Visual checks u
   - Segment labels sit at their real heights: `drawStack` returns its height → screen mapping.
 - **Grain glow.** In the output panel, grains flicker briefly and dimmer (0.4 s), so the positions keep contrast at 100+ grains/s.
 - **Termite asset.** It holds 286 heights, 2 825 polylines and 133 k points (0.55 MB), at step 2 and tolerance 0.25.
+- **Final review fixes:**
+  - The kick follows `termiteKick` as wired: half gated silent, the rest on speakers 3–4, so the printed kick rate is the audible one (0.46875 kicks per tick).
+  - Grain chance truncates T, as Max's `[<]` does.
+  - In patch mode, LIVE `/routing/sound/{tones,grains,kick}` replaces the printed rates, tagged LIVE. The card's LIVE badge shows only when a printed value is live.
+  - VOICES and OUTPUT always say their picks are drawn here, playing or held.

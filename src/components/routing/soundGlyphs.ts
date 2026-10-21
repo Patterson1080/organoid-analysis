@@ -6,11 +6,11 @@ import { pad6 } from '../../show/routing/captions';
 import { SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { Box } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
-import type { SoundView } from '../../show/routing/live';
-import { NOTE_NAMES, PATCH, chordOf, expectedKicks, grainSpeed, grainTickMs, kickMs, toneMs } from '../../show/routing/maxPatch';
+import type { Rate, SoundView } from '../../show/routing/live';
+import { NOTE_NAMES, PATCH, chordOf, grainSpeed, grainTickMs, kickMs, toneMs } from '../../show/routing/maxPatch';
 import type { PatchData } from '../../show/routing/maxPatch';
 import { droneLevel, eventsSince } from '../../show/routing/soundEvents';
-import { activityEnvelope } from '../../show/routing/soundLayout';
+import { activityEnvelope, soundCaptions } from '../../show/routing/soundLayout';
 import { clipTo, frame, lines, text } from './glyphs';
 import type { G } from './glyphs';
 
@@ -41,10 +41,8 @@ function envelope(p: PatchData, columns: number, range: Range): Float32Array {
 export const noteNames = (notes: readonly number[]) =>
     [...new Set(notes.map(n => n % 12))].sort((a, b) => a - b).map(pc => NOTE_NAMES[pc]).join(' ');
 
-export const perSecond = (ms: number | null) => (ms ? 1000 / ms : 0);
-
-/** Grains a second at these values: ticks × the chance at the LFO's midpoint. */
-export const grainsPerSecond = (sv: SoundView) => perSecond(sv.grainTickMs) * sv.grainChance;
+/** Events a second as printed: Max's own figure when it reports one, tagged LIVE. */
+export const rateText = (r: Rate, digits = 2) => `${r.perSec.toFixed(digits)}/s${r.live ? ' · LIVE' : ''}`;
 
 /** The pass's activity as Max reads it, the burst flags that step the chord, the index Max last heard. */
 export function activityStrip(g: G, b: Box, p: PatchData, range: Range, heard: number | null, s: number): void {
@@ -148,7 +146,7 @@ export function score(g: G, b: Box, sv: SoundView, now: number, s: number): void
         else if (e.kind === 'grain') {
             g.fillStyle = `rgba(255,255,255,${0.55 * fade})`;
             g.fillRect(x, grainBand.y + grainBand.h * (1 - Math.log2(e.speed) / 6) - s, 1.5 * s, 1.5 * s);
-        } else {
+        } else if (e.position !== 0) { // a gated kick makes no sound
             const ring = Math.max(0, 1 - (now - e.at) / KICK_DECAY_MS), h = kickBand.h * (e.echo === 0 ? 1 : 0.6);
             g.fillStyle = `rgba(255,255,255,${0.15 + 0.7 * ring})`;
             g.fillRect(x - s, kickBand.y + kickBand.h - h, 2 * s, h);
@@ -191,18 +189,18 @@ export function rules(g: G, b: Box, sv: SoundView, s: number): void {
     const charts: [(x: number) => number | null, number, [number, number], [string, string][]][] = [
         [x => toneMs(x * x), Math.sqrt(sv.a), [PATCH.toneMs[0], PATCH.toneMs[11]], [
             ['TONES · √a → 12 steps', '#ddd'],
-            [`${ms(sv.toneMs)}${sv.held.tone ? ' (held)' : ''} · ${perSecond(sv.toneMs).toFixed(2)}/s`, '#aaa'],
+            [`${ms(sv.toneMs)}${sv.held.tone ? ' (held)' : ''} · ${rateText(sv.rates.tones)}`, '#aaa'],
             ['a note of the chord', '#666'],
         ]],
         [x => grainTickMs(x ** 8), sv.a ** (1 / 8), [PATCH.grainMs[0], PATCH.grainMs[5]], [
             ['GRAINS · a^⅛ → tick', '#ddd'],
-            [`${ms(sv.grainTickMs)} · ${Math.round(sv.grainChance * 100)} % · ${grainsPerSecond(sv).toFixed(0)}/s`, '#aaa'],
+            [`${ms(sv.grainTickMs)} · ${Math.round(sv.grainChance * 100)} % · ${rateText(sv.rates.grains, 0)}`, '#aaa'],
             [sv.grainLen ? `${sv.grainLen[0]}|${sv.grainLen[1]} ms, ×${grainSpeed(sv.grainLen[0])}|×${grainSpeed(sv.grainLen[1])}` : '—', '#666'],
         ]],
         [x => kickMs(x), sv.a, [PATCH.kickMs[0], PATCH.kickMs[5]], [
             ['KICK · a → 6 steps', '#ddd'],
-            [`${ms(sv.kickMs)}${sv.held.kick ? ' (held)' : ''} · ${(perSecond(sv.kickMs) * expectedKicks()).toFixed(2)}/s`, '#aaa'],
-            ['silence holds', '#666'],
+            [`${ms(sv.kickMs)}${sv.held.kick ? ' (held)' : ''} · ${rateText(sv.rates.kick)}`, '#aaa'],
+            ['half gated silent', '#666'],
         ]],
     ];
     charts.forEach(([fn, x, range, caption], i) => {
@@ -264,7 +262,7 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
 
     text(g, 'OUTPUT · 16 positions → speakers 3–6', b.x, b.y, fontPx(9, s), '#ddd');
     const top = b.y + px * 2.2, rowH = Math.min((b.h - px * 6) / 3, 34 * s), spk = Math.min(rowH, 22 * s);
-    const pairs: [string, string, number, number][] = [['3', '4', 1, 17], ['5', '6', 9, 18]];
+    const pairs: [string, string, number, number | null][] = [['3', '4', 1, 17], ['5', '6', 9, null]]; // out18 never gets a kick
     pairs.forEach(([l, r, first, kickPos], k) => {
         const y = top + k * (rowH + 6 * s), inner: Box = { x: b.x + spk + 6 * s, y, w: b.w - 2 * (spk + 6 * s), h: rowH };
         for (const [label, x] of [[l, b.x], [r, b.x + b.w - spk]] as [string, number][]) {
@@ -281,6 +279,7 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
             }
             frame(g, c, '#2a2a2a');
         }
+        if (kickPos === null) return;
         const kick = glow[kickPos], cx = inner.x + inner.w / 2;
         g.strokeStyle = `rgba(255,255,255,${0.25 + 0.75 * kick})`;
         g.lineWidth = Math.max(1, 2 * s * (0.5 + kick));
@@ -307,7 +306,8 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
     g.save();
     clipTo(g, foot);
     lines(g, [
-        [`${unrouted} unrouted in 10 s (position 0: 1 in 17 sounds nowhere)`, '#777'],
+        [soundCaptions(true).output, '#777'],
+        [`${unrouted} unrouted in 10 s (gate 0)`, '#777'],
         ['arm 1: a note every 15 + 1000·(d/100)² ms, up the chord, C3–C5', '#666'],
         [`patch ${SOUND_FACTS.patchFile}`, '#555'],
         [`arm 1 ${SOUND_FACTS.serialFile}`, '#555'],

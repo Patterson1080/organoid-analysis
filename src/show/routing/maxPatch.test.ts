@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    NOTE_NAMES, activityAt, arpIntervalMs, chordOf, chordStep, expectedKicks, flagsIn, grainChance, grainLenBins,
+    NOTE_NAMES, activityAt, arpIntervalMs, audibleKicks, chordOf, chordStep, expectedKicks, flagsIn, grainChance, grainLenBins,
     grainSpeed, grainTickMs, kickMs, nextFlag, patchData, showChordFlags, toneMs,
 } from './maxPatch.ts';
 
@@ -46,6 +46,14 @@ test('grain chance falls with activity and the LFO', () => {
 
 test('the kick chain plays 0.9375 kicks per tick', () => {
     assert.equal(expectedKicks(), 0.9375);
+});
+
+test('half the kicks are gated silent: random 2 → gate~ 2 has no + 1', () => {
+    assert.equal(audibleKicks(), 0.46875);
+});
+
+test('grain chance compares as ints, as Max does', () => {
+    assert.equal(grainChance(0.1, 0), 0.65); // T = 35.3 → [<] without an argument truncates to 35
 });
 
 test('the chord counter wraps through a held K', () => {

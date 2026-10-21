@@ -14,7 +14,7 @@ import { printedLayers } from '../../show/routing/vessel';
 import type { Vessel } from '../../show/routing/vessel';
 import { MONO, arrowHead, clipTo, frame, hangingArms, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, text } from './glyphs';
 import type { G } from './glyphs';
-import { activityStrip, chordName, chordStrip, grainsPerSecond, perSecond } from './soundGlyphs';
+import { activityStrip, chordName, chordStrip, rateText } from './soundGlyphs';
 import { CLAY_RGB, TERMITE_RGB, TURN_MS, cachedDraw, drawStack, termiteFrame, termiteLayers, vesselFrame, vesselLayers } from './artifactGlyphs';
 import type { ArtifactCache } from './artifactGlyphs';
 
@@ -225,11 +225,10 @@ function drawSound(g: G, b: Box, v: DrawInput) {
         activityStrip(g, { ...left, h: left.h * 0.6 }, v.patch, v.range, sv.heardIndex, s);
         chordStrip(g, { ...left, y: left.y + left.h * 0.68, h: left.h * 0.32 }, sv.chordStep, s);
         chordName(g, { x: left.x + left.w + 8 * s, y: glyph.y, w: nameW, h: glyph.h }, sv, s);
-        const kick = sv.kickMs ? `kick every ${(sv.kickMs / 1000).toFixed(1)} s` : 'kick —';
-        const telemetry = sv.chordSource === 'live' || live.rateSource === 'live';
+        const r = sv.rates, telemetry = sv.chordSource === 'live' || r.tones.live || r.grains.live || r.kick.live;
         lines(g, [
             ['Max reads activity + burst flags at /index', '#bbb'],
-            [`tones ${perSecond(sv.toneMs).toFixed(1)}/s · grains ${grainsPerSecond(sv).toFixed(0)}/s · ${kick}`, '#888'],
+            [`tones ${rateText(r.tones, 1)} · grains ${rateText(r.grains, 0)} · kick ${rateText(r.kick)}`, '#888'],
             [telemetry ? 'LIVE · from the patch' : `PATCH RULES${sv.chordSource === 'computed' ? ' · chord ≈' : ''}`, telemetry ? '#fff' : '#777'],
         ], textBox, s);
         return;

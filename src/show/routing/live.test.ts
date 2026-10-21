@@ -233,6 +233,16 @@ test('arm 1 telemetry drives the arpeggio; without it there is none', () => {
     assert.equal(eventsSince(quiet.sound.sim, -Infinity).filter(e => e.kind === 'arp').length, 0);
 });
 
+test('fresh tone telemetry overrides the patch rate, marked LIVE', () => {
+    const s = createLiveState(neurons, spikes);
+    const t = createTelemetry();
+    applyTelemetry(t, '/routing/sound/tones', [7.5], 1000);
+    advanceLive(s, input({ index: 1, patch: patch(), telemetry: t, now: 1000 }));
+    assert.deepEqual(s.sound.rates.tones, { perSec: 7.5, live: true });
+    assert.equal(s.sound.rates.grains.live, false);
+    assert.ok(Math.abs(s.sound.rates.kick.perSec - 0.46875 / 3.2) < 1e-9); // audible kicks at 3200 ms
+});
+
 test('a held playhead keeps the last activity', () => {
     const s = createLiveState(neurons, spikes);
     advanceLive(s, input({ index: 1, patch: patch(), now: 0 }));

@@ -11,7 +11,7 @@ import { BACKBONE_COUNT, LED_FACTS, ROBOT_FACTS, VISUAL_FACTS } from './facts.ts
 import { firingRow } from './firingBlob.ts';
 import type { FiringBlob } from './firingBlob.ts';
 import {
-    PATCH, activityAt, arpIntervalMs, chordOf, chordStep, flagsIn, grainChance, grainLenBins, grainTickMs, kickMs, nextFlag,
+    PATCH, activityAt, arpIntervalMs, audibleKicks, chordOf, chordStep, flagsIn, grainChance, grainLenBins, grainTickMs, kickMs, nextFlag,
     showChordFlags, toneMs,
 } from './maxPatch.ts';
 import type { PatchData } from './maxPatch.ts';
@@ -63,7 +63,13 @@ export interface SoundView {
     chordSource: 'computed' | 'live' | 'unknown';
     arm1Cm: number | null; // fresh telemetry only: no arm, no arpeggio
     arpMs: number | null;
+    rates: { tones: Rate; grains: Rate; kick: Rate }; // what the view prints: Max's own when it reports them
     sim: SoundSim;
+}
+
+export interface Rate {
+    perSec: number;
+    live: boolean;
 }
 
 export interface Arm {
@@ -154,7 +160,9 @@ export function createLiveState(neurons: Neuron[], spikes: SpikeEvent[]): LiveSt
         sound: {
             source: 'fallback', heardIndex: null, v: 0, a: 0, toneMs: null, kickMs: null, held: { tone: false, kick: false },
             grainTickMs: null, grainLen: null, grainChance: 0, threshold: 10, passFlags: 0, flagsSoFar: 0, nextFlag: null,
-            chordStep: null, chordSource: 'unknown', arm1Cm: null, arpMs: null, sim: createSoundSim(1),
+            chordStep: null, chordSource: 'unknown', arm1Cm: null, arpMs: null,
+            rates: { tones: { perSec: 0, live: false }, grains: { perSec: 0, live: false }, kick: { perSec: 0, live: false } },
+            sim: createSoundSim(1),
         },
     };
 }
@@ -255,13 +263,13 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
     s.ledAgeMs += dt;
     if (input.ledFrame && input.ledFrame !== s.lastLedFrame) applyLedFrame(s, input.ledFrame);
 
-    stepSound(s.sound, input, dt);
+    stepSound(s.sound, s.soundLive, input, dt);
     stepArms(s, telemetry, now, dt);
 }
 
 /** The patch at the last index Max heard (it holds while /index is still), the chord its counter is
  *  on, arm 1's arpeggio, and its voices played forward: Max's metros run on whatever happens. */
-function stepSound(sv: SoundView, input: LiveInput, dt: number) {
+function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], input: LiveInput, dt: number) {
     const { patch, telemetry, now, range } = input;
     if (input.index !== null) sv.heardIndex = input.index;
     const v = patch && sv.heardIndex !== null ? activityAt(patch, sv.heardIndex) : null;
@@ -302,6 +310,15 @@ function stepSound(sv: SoundView, input: LiveInput, dt: number) {
         sv.chordStep = null;
         sv.chordSource = 'unknown';
     }
+
+    // Events a second as the patch's rules give them, unless Max reports its own.
+    const rate = (reported: number | undefined, computed: number): Rate =>
+        reported !== undefined ? { perSec: reported, live: true } : { perSec: computed, live: false };
+    sv.rates = {
+        tones: rate(soundLive.tones, sv.toneMs ? 1000 / sv.toneMs : 0),
+        grains: rate(soundLive.grains, sv.grainTickMs ? (1000 / sv.grainTickMs) * sv.grainChance : 0),
+        kick: rate(soundLive.kick, sv.kickMs ? (1000 / sv.kickMs) * audibleKicks() : 0),
+    };
 
     const proximity = telemetry?.robot[0]?.proximity;
     sv.arm1Cm = proximity && fresh(proximity, now) ? proximity.value : null;
