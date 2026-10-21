@@ -48,6 +48,26 @@ export function depthAlpha(depth: number, radius: number): number {
     return 0.25 + 0.75 * Math.min(1, Math.max(0, t));
 }
 
+/** The two artifacts as they stand: side by side on one ground line at one scale (mm per pixel),
+ *  the pair centred in the box. Sizes are their drawn extents in mm; either may be missing. */
+export function pairLayout(box: Box, termite: { w: number; h: number } | null, vessel: { w: number; h: number } | null, gap: number):
+    { termite: Box | null; vessel: Box | null; mmPerPx: number } {
+    const items = [termite, vessel].filter((x): x is { w: number; h: number } => x !== null && x.w > 0 && x.h > 0);
+    if (items.length === 0) return { termite: null, vessel: null, mmPerPx: 1 };
+    const gaps = gap * (items.length - 1), sumW = items.reduce((a, x) => a + x.w, 0), maxH = Math.max(...items.map(x => x.h));
+    const k = Math.min((box.w - gaps) / sumW, box.h / maxH); // pixels per mm
+    const ground = box.y + box.h;
+    let x = box.x + (box.w - (sumW * k + gaps)) / 2;
+    const place = (o: { w: number; h: number } | null): Box | null => {
+        if (!o || o.w <= 0 || o.h <= 0) return null;
+        const b = { x, y: ground - o.h * k, w: o.w * k, h: o.h * k };
+        x += b.w + gap;
+        return b;
+    };
+    const t = place(termite);
+    return { termite: t, vessel: place(vessel), mmPerPx: 1 / k };
+}
+
 /** Landscape: the termite form on the left (55 %), the vessel over the schematic on the right.
  *  Portrait: the form on top, the vessel and the schematic side by side below. */
 export function fabPanels(story: Box): { form: Box; vessel: Box; schematic: Box } {

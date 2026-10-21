@@ -348,7 +348,7 @@ function termitePanel(g: G, b: Box, v: DrawInput, yaw: number, s: number) {
         g.restore();
     }
     const seg = current ? current.segment : 0, inSeg = stack.filter(sl => sl.segment === seg), j = inSeg.indexOf(current);
-    const view = turning >= 0.5 ? 'turning · one turn every 48 s' : `PLA print preview · segment ${seg + 1} · slice ${j + 1} / ${inSeg.length}`;
+    const view = turning >= 0.5 ? `≈ ${FAB_FACTS.termite.heightMm / 10} cm as built · turning once every 48 s` : `PLA print preview · printed segment ${seg + 1} · slice ${j + 1} / ${inSeg.length}`;
     g.save();
     const cap: Box = { x: b.x, y: b.y + b.h - capH, w: b.w, h: capH };
     clipTo(g, cap);
@@ -382,7 +382,7 @@ function vesselPanel(g: G, b: Box, v: DrawInput, yaw: number, s: number) {
     g.save();
     clipTo(g, info);
     lines(g, [
-        [`layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈`, '#fff'],
+        [`layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈ · ${Math.round(vessel.heightMm)} mm tall, beside the termite form`, '#fff'],
         [`z ${z} mm${printed < vessel.layers.length ? ` · printed to layer ${printed}` : ''}`, '#bbb'],
         ["each neuron's firing locally speeds the contour's growth; sampled layers stack into one spiral", '#888'],
         ['linear in the recording: the sketch adds a layer only while a neuron fires', '#666'],

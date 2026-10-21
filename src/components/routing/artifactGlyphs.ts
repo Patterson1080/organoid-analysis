@@ -55,6 +55,9 @@ export function termiteFrame(t: TermiteSlices, explode: number): StackFrame {
     return { cx, cz, r, yMin: b.minY, yMax: b.maxY + Math.max(0, t.segments.length - 1) * explode };
 }
 
+/** A stack's drawn extent in its frame's units: its width, and its height as the raised camera sees it. */
+export const stackExtent = (f: StackFrame) => ({ w: 2 * f.r, h: (f.yMax - f.yMin) * Math.cos(ELEV) + 2 * f.r * Math.sin(ELEV) });
+
 export const vesselFrame = (v: Vessel): StackFrame => ({ cx: 0, cz: 0, r: v.maxRadius, yMin: 0, yMax: (v.layers.length + 1) * v.layerMm });
 
 /** One stroke per polyline, turned and raised, brighter in front; fitted and centred in the box.
@@ -139,7 +142,7 @@ export function planView(g: G, b: Box, slice: StackSlice, f: StackFrame, rgb: st
 
 /** The installation as the parent spec states it, nothing more: the laser-cut frame holding the vessel,
  *  the termite form and the two LED matrices, fibres carrying the matrices' light into the glassware. */
-export function schematic(g: G, b: Box, ledShare: number, s: number): void {
+export function schematic(g: G, b: Box, ledShare: number, s: number, vesselToTermite = 451 / 700): void {
     if (b.w < 40 || b.h < 40) return;
     const px = fontPx(8, s);
     const f: Box = { x: b.x + b.w * 0.12, y: b.y + px * 1.8, w: b.w * 0.76, h: b.h - px * 4.2 };
@@ -187,13 +190,14 @@ export function schematic(g: G, b: Box, ledShare: number, s: number): void {
     const floor = f.y + f.h - px * 1.7, art = f.h * 0.28;
     const vx = f.x + f.w * 0.3, tx = f.x + f.w * 0.68;
     g.strokeStyle = `rgb(${CLAY_RGB})`;
+    const vh = art * vesselToTermite; // their real heights, side by side as installed
     g.beginPath(); // the vessel: wider at the top
-    g.moveTo(vx - art * 0.22, floor);
-    g.lineTo(vx - art * 0.34, floor - art * 0.75);
-    g.moveTo(vx + art * 0.22, floor);
-    g.lineTo(vx + art * 0.34, floor - art * 0.75);
-    g.moveTo(vx - art * 0.22, floor);
-    g.lineTo(vx + art * 0.22, floor);
+    g.moveTo(vx - vh * 0.3, floor);
+    g.lineTo(vx - vh * 0.37, floor - vh);
+    g.moveTo(vx + vh * 0.3, floor);
+    g.lineTo(vx + vh * 0.37, floor - vh);
+    g.moveTo(vx - vh * 0.3, floor);
+    g.lineTo(vx + vh * 0.3, floor);
     g.stroke();
     g.strokeStyle = `rgb(${TERMITE_RGB})`;
     g.beginPath(); // the termite form: a tall column of four parts
@@ -204,5 +208,5 @@ export function schematic(g: G, b: Box, ledShare: number, s: number): void {
     g.stroke();
     text(g, 'vessel', vx, floor + 2 * s, px, '#999', 'center');
     text(g, 'termite form', tx, floor + 2 * s, px, '#999', 'center');
-    lines(g, [['schematic · not to scale · fibres glow with the lit LED pixels', '#666']], { x: b.x, y: b.y + b.h - px * 1.5, w: b.w, h: px * 1.5 }, s, 8);
+    lines(g, [['schematic: the two pieces at their real heights, the frame and fibres not to scale', '#666']], { x: b.x, y: b.y + b.h - px * 1.5, w: b.w, h: px * 1.5 }, s, 8);
 }

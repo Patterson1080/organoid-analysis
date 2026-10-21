@@ -87,7 +87,7 @@ export const ROBOT_FACTS = {
 
 /** SIGGRAPH 2026 §Biome III: the termite form, from the same agents as Biome I. */
 export const FAB_FACTS = {
-    termite: { material: 'PLA', segments: 4, lattice: '100³', source: 'SIGGRAPH 2026' },
+    termite: { material: 'PLA', segments: 4, lattice: '100³', source: 'SIGGRAPH 2026', heightMm: 700 }, // ≈ 70 cm as built (the team)
     pipeline: '131 agents · 100³ lattice → point cloud → Poisson surface → 4 PLA segments',
 };
 

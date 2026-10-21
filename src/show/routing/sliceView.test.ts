@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { depthAlpha, fabPanels, project, sliceStride, termiteStack, vesselStack } from './sliceView.ts';
+import { depthAlpha, fabPanels, pairLayout, project, sliceStride, termiteStack, vesselStack } from './sliceView.ts';
 import type { Box } from './layout.ts';
 import type { TermiteSlices } from './termiteSlices.ts';
 import type { Vessel } from './vessel.ts';
@@ -57,4 +57,26 @@ test('fab panels tile the story at any aspect', () => {
         for (const b of boxes) assert.ok(inside(story, b) && b.w > 0 && b.h > 0, JSON.stringify(b));
         for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(!overlap(boxes[i], boxes[j]));
     }
+});
+
+test('one scale for both, on one ground line', () => {
+    const box = { x: 10, y: 20, w: 600, h: 400 };
+    const p = pairLayout(box, { w: 233, h: 700 }, { w: 332, h: 451 }, 20);
+    assert.ok(p.termite && p.vessel);
+    const t = p.termite as Box, v = p.vessel as Box;
+    assert.ok(Math.abs(t.h / v.h - 700 / 451) < 1e-9, 'heights keep their ratio');
+    assert.ok(Math.abs(t.w / t.h - 233 / 700) < 1e-9 && Math.abs(v.w / v.h - 332 / 451) < 1e-9);
+    assert.equal(t.y + t.h, box.y + box.h);
+    assert.equal(v.y + v.h, box.y + box.h);
+    for (const b of [t, v]) assert.ok(b.x >= box.x - 1e-9 && b.y >= box.y - 1e-9 && b.x + b.w <= box.x + box.w + 1e-9);
+    assert.ok(t.x + t.w + 20 <= v.x + 1e-9, 'side by side with the gap');
+    assert.ok(Math.abs(p.mmPerPx - 700 / t.h) < 1e-9);
+});
+
+test('a lone artifact fills the pair box', () => {
+    const box = { x: 0, y: 0, w: 600, h: 400 };
+    const p = pairLayout(box, null, { w: 332, h: 451 }, 20);
+    assert.equal(p.termite, null);
+    const v = p.vessel as Box;
+    assert.ok(Math.abs(v.h - 400) < 1e-9 && Math.abs(v.x + v.w / 2 - 300) < 1e-9);
 });

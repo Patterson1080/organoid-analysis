@@ -3,7 +3,7 @@
 
 import { formatClock } from '../../show/showMath';
 import { firingCaption, pad6, strikeCaption } from '../../show/routing/captions';
-import { ATTRIBUTION, CARD_TITLES, LED_FACTS, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
+import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../../show/routing/facts';
 import type { Box, RoutingLayout } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
@@ -16,7 +16,8 @@ import { MONO, arrowHead, clipTo, frame, ledGrid, lines, neuronMap, overlaps, ra
 import { armPhaseText, armsPanel } from './armGlyphs';
 import type { G } from './glyphs';
 import { activityStrip, chordName, chordStrip, rateText } from './soundGlyphs';
-import { CLAY_RGB, TERMITE_RGB, TURN_MS, cachedDraw, drawStack, termiteFrame, termiteLayers, vesselFrame, vesselLayers } from './artifactGlyphs';
+import { CLAY_RGB, TERMITE_RGB, TURN_MS, cachedDraw, drawStack, stackExtent, termiteFrame, termiteLayers, vesselFrame, vesselLayers } from './artifactGlyphs';
+import { pairLayout } from '../../show/routing/sliceView';
 import type { ArtifactCache } from './artifactGlyphs';
 
 export type SwarmKey = 'physarum' | 'boids' | 'termites';
@@ -189,32 +190,37 @@ function drawLed(g: G, b: Box, v: DrawInput) {
 }
 
 function drawFab(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, { glyph, textBox } = cardParts(b, s, 3), { termite, vessel } = v;
+    const s = v.scale, { glyph, textBox } = cardParts(b, s, 3), { termite, vessel } = v, px = fontPx(8, s);
     if (!termite && !vessel) {
         lines(g, [['no artifact data (data/)', '#777'], ['same recording → growth → print', '#555']], { ...glyph, y: glyph.y + glyph.h / 3 }, s);
         return;
     }
-    // Both artifacts as their print layers, turning: the termite form, and the vessel grown to the playhead.
-    const yaw = (v.now / TURN_MS) * Math.PI * 2, [left, right] = row(glyph, 2, 8 * s);
-    if (termite) cachedDraw(g, v.artifacts, 'card-termite', left, v.now, '', (cg, box) => {
-        drawStack(cg, box, termiteLayers(termite, 0), termiteFrame(termite, 0), { yaw, rgb: TERMITE_RGB, lineWidth: 0.7 });
-    });
-    else lines(g, [['termite form: link termite_slices.bin into data/', '#666']], { ...left, y: left.y + left.h / 3 }, s);
-    if (vessel) {
+    // The two pieces as installed: side by side at one scale, turning; the vessel grown to the playhead.
+    const yaw = (v.now / TURN_MS) * Math.PI * 2;
+    const tf = termite ? termiteFrame(termite, 0) : null, vf = vessel ? vesselFrame(vessel) : null;
+    const mmPerUnit = termite ? FAB_FACTS.termite.heightMm / (termite.bounds.maxY - termite.bounds.minY) : 1;
+    const te = tf ? stackExtent(tf) : null, ve = vf ? stackExtent(vf) : null;
+    const pair = pairLayout({ ...glyph, h: glyph.h - px * 1.6 }, te && { w: te.w * mmPerUnit, h: te.h * mmPerUnit }, ve, 10 * s);
+    if (termite && tf && pair.termite) {
+        cachedDraw(g, v.artifacts, 'card-termite', pair.termite, v.now, '', (cg, box) => {
+            drawStack(cg, box, termiteLayers(termite, 0), tf, { yaw, rgb: TERMITE_RGB, lineWidth: 0.7 });
+        });
+        text(g, `≈ ${FAB_FACTS.termite.heightMm / 10} cm`, pair.termite.x + pair.termite.w / 2, glyph.y + glyph.h - px * 1.3, px, '#999', 'center');
+    }
+    if (vessel && vf && pair.vessel) {
         const printed = printedLayers(vessel, VESSEL_FACTS.printedMm);
-        cachedDraw(g, v.artifacts, 'card-vessel', right, v.now, String(v.vesselLayer), (cg, box) => {
-            drawStack(cg, box, vesselLayers(vessel), vesselFrame(vessel), {
+        cachedDraw(g, v.artifacts, 'card-vessel', pair.vessel, v.now, String(v.vesselLayer), (cg, box) => {
+            drawStack(cg, box, vesselLayers(vessel), vf, {
                 yaw, rgb: CLAY_RGB, lineWidth: 0.7, currentIndex: v.vesselLayer, faintFrom: v.vesselLayer + 1,
                 dottedFrom: printed < vessel.layers.length ? printed : undefined,
             });
         });
-    } else {
-        lines(g, [['vessel: link vessel.gcode into data/', '#666']], { ...right, y: right.y + right.h / 3 }, s);
+        text(g, `${Math.round(vessel.heightMm)} mm`, pair.vessel.x + pair.vessel.w / 2, glyph.y + glyph.h - px * 1.3, px, '#999', 'center');
     }
     lines(g, [
-        [termite ? `termite form · PLA · ${termite.segments.length} segments` : 'termite form · not linked', '#bbb'],
-        [vessel ? `vessel · clay · layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈` : 'vessel · not linked', '#888'],
-        ['both made before the show', '#555'],
+        [termite ? `termite form · PLA · ${termite.segments.length} printed segments` : 'termite form · link termite_slices.bin', '#bbb'],
+        [vessel ? `clay vessel beside it · layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈` : 'vessel · link vessel.gcode', '#888'],
+        ['side by side, to scale · made before the show', '#555'],
     ], textBox, s);
 }
 
