@@ -26,6 +26,8 @@ import { parseVesselGcode } from './show/routing/vessel';
 import { patchData } from './show/routing/maxPatch';
 import type { PatchData } from './show/routing/maxPatch';
 import { parseWav16 } from './show/routing/wav';
+import { parseTermiteSlices } from './show/routing/termiteSlices';
+import type { TermiteSlices } from './show/routing/termiteSlices';
 import type { Vessel } from './show/routing/vessel';
 import { parseNeuronCSV, parseSpikeCSV } from './utils/dataProcessing';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
@@ -158,6 +160,7 @@ function App() {
     const [firingBlob, setFiringBlob] = useState<FiringBlob | null>(null);
     const [vessel, setVessel] = useState<Vessel | null>(null);
     const [patch, setPatch] = useState<PatchData | null>(null);
+    const [termite, setTermite] = useState<TermiteSlices | null>(null);
     const showRunning = !!showState?.running;
     const showOn = showRunning && showState?.phase === 'on';
 
@@ -525,6 +528,10 @@ function App() {
                 const wav = (name: string) => fetch(`${base}/${name}`).then(r => r.arrayBuffer()).then(parseWav16);
                 Promise.all([wav('activitylevel.wav'), wav('burstflags.wav')]).then(([activity, bursts]) => setPatch(patchData(activity, bursts)))
                     .catch(e => console.warn('data/activitylevel.wav + burstflags.wav:', e));
+            }
+            if (status.termite) {
+                fetch(`${base}/termite_slices.bin`).then(r => r.arrayBuffer()).then(b => setTermite(parseTermiteSlices(b)))
+                    .catch(e => console.warn('data/termite_slices.bin:', e));
             }
             if (!status.neurons && !status.spikes) return;
             setBridgeDataStatus('Loading data/ from the bridge…');
@@ -1454,6 +1461,7 @@ function App() {
                                 firingBlob={firingBlob}
                                 vessel={vessel}
                                 patch={patch}
+                                termite={termite}
                             />
                         </div>
                     )}

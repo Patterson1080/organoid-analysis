@@ -6,6 +6,7 @@ import type { FiringBlob } from '../show/routing/firingBlob';
 import type { Telemetry } from '../show/routing/telemetry';
 import type { Vessel } from '../show/routing/vessel';
 import type { PatchData } from '../show/routing/maxPatch';
+import type { TermiteSlices } from '../show/routing/termiteSlices';
 import { RoutingView } from './RoutingView';
 
 export interface ShowStateSnapshot {
@@ -30,6 +31,7 @@ interface ShowPanelProps {
     firingBlob: FiringBlob | null;
     vessel: Vessel | null;
     patch: PatchData | null;
+    termite: TermiteSlices | null;
 }
 
 const RASTER_HALF_MS = 1000;   // raster shows ±1 s of data around the playhead
@@ -76,7 +78,7 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
-export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false, neurons, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel, patch }: ShowPanelProps) {
+export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false, neurons, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
@@ -307,6 +309,7 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
                 firingBlob={firingBlob}
                 vessel={vessel}
                 patch={patch}
+                termite={termite}
                 connected={connected}
                 presentation={presentation}
             />

@@ -16,6 +16,8 @@ import type { Telemetry } from '../show/routing/telemetry';
 import { createTour, setTourEnabled, tourCurrent, tourInteract, tourPaused, tourProgress, tourTick } from '../show/routing/tour';
 import type { TourState } from '../show/routing/tour';
 import type { PatchData } from '../show/routing/maxPatch';
+import type { TermiteSlices } from '../show/routing/termiteSlices';
+import { createArtifactCache } from './routing/artifactGlyphs';
 import { layerForIndex } from '../show/routing/vessel';
 import type { Vessel } from '../show/routing/vessel';
 import { loadRoutingSettings, saveRoutingSettings } from '../utils/routingSettings';
@@ -37,6 +39,7 @@ interface RoutingViewProps {
     firingBlob: FiringBlob | null;
     vessel: Vessel | null;
     patch: PatchData | null;
+    termite: TermiteSlices | null;
     connected: boolean;
     presentation: boolean;
     height?: number; // overrides the sizing below
@@ -59,7 +62,8 @@ const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y
 
 /** Where the show's signal goes and how each medium maps it, drawn live from the playhead. */
 export function RoutingView(props: RoutingViewProps) {
-    const { neurons, spikes, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel, patch, presentation } = props;
+    const { neurons, spikes, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel, patch, termite, presentation } = props;
+    const artifacts = useMemo(createArtifactCache, []); // offscreen layer renders, kept across frames
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const tourTextRef = useRef<HTMLSpanElement>(null);
@@ -234,6 +238,8 @@ export function RoutingView(props: RoutingViewProps) {
                 vessel,
                 patch,
                 range,
+                termite,
+                artifacts,
                 vesselLayer: vessel ? layerForIndex(vessel, parked ?? 0) : 0,
                 index,
                 mode,
@@ -250,7 +256,7 @@ export function RoutingView(props: RoutingViewProps) {
         };
         raf = requestAnimationFrame(frame);
         return () => cancelAnimationFrame(raf);
-    }, [shown, width, height, live, swarms, neurons, spikes, firingBlob, vessel, patch, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef]);
+    }, [shown, width, height, live, swarms, neurons, spikes, firingBlob, vessel, patch, termite, artifacts, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef]);
 
     const local = (e: ReactPointerEvent<HTMLCanvasElement>) => {
         const r = e.currentTarget.getBoundingClientRect();

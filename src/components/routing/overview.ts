@@ -9,11 +9,14 @@ import type { Box, RoutingLayout } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
 import type { LiveState } from '../../show/routing/live';
 import type { PatchData } from '../../show/routing/maxPatch';
+import type { TermiteSlices } from '../../show/routing/termiteSlices';
 import { printedLayers } from '../../show/routing/vessel';
 import type { Vessel } from '../../show/routing/vessel';
-import { MONO, arrowHead, clipTo, frame, hangingArms, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, text, vesselProfile, vesselTop } from './glyphs';
+import { MONO, arrowHead, clipTo, frame, hangingArms, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, text } from './glyphs';
 import type { G } from './glyphs';
 import { activityStrip, chordName, chordStrip, grainsPerSecond, perSecond } from './soundGlyphs';
+import { CLAY_RGB, TERMITE_RGB, TURN_MS, cachedDraw, drawStack, termiteFrame, termiteLayers, vesselFrame, vesselLayers } from './artifactGlyphs';
+import type { ArtifactCache } from './artifactGlyphs';
 
 export type SwarmKey = 'physarum' | 'boids' | 'termites';
 
@@ -24,6 +27,8 @@ export interface DrawInput {
     vesselLayer: number;
     patch: PatchData | null;
     range: { start: number; end: number }; // the indices a pass covers
+    termite: TermiteSlices | null;
+    artifacts: ArtifactCache;
     index: number | null;
     mode: 'show' | 'local';
     phase: 'on' | 'off' | 'stopped';
@@ -183,18 +188,33 @@ function drawLed(g: G, b: Box, v: DrawInput) {
 }
 
 function drawFab(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, { glyph, textBox } = cardParts(b, s, 3);
-    const vessel = v.vessel;
-    if (!vessel) {
-        lines(g, [['no vessel data (data/vessel.gcode)', '#777'], ['same recording → growth → G-code', '#555']], { ...glyph, y: glyph.y + glyph.h / 3 }, s);
+    const s = v.scale, { glyph, textBox } = cardParts(b, s, 3), { termite, vessel } = v;
+    if (!termite && !vessel) {
+        lines(g, [['no artifact data (data/)', '#777'], ['same recording → growth → print', '#555']], { ...glyph, y: glyph.y + glyph.h / 3 }, s);
         return;
     }
-    const [side, top] = [{ ...glyph, w: glyph.w * 0.32 }, { ...glyph, x: glyph.x + glyph.w * 0.36, w: glyph.w * 0.64 }];
-    const printed = printedLayers(vessel, VESSEL_FACTS.printedMm);
-    vesselProfile(g, side, vessel, v.vesselLayer, printed);
-    vesselTop(g, top, vessel, v.vesselLayer, 10);
-    const z = Math.round((v.vesselLayer + 1) * vessel.layerMm);
-    lines(g, [[`layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈`, '#fff'], [`z ${z} mm · ${vessel.layerMm} mm spiral`, '#888'], [`${VESSEL_FACTS.clay}`, '#666']], textBox, s);
+    // Both artifacts as their print layers, turning: the termite form, and the vessel grown to the playhead.
+    const yaw = (v.now / TURN_MS) * Math.PI * 2, [left, right] = row(glyph, 2, 8 * s);
+    if (termite) cachedDraw(g, v.artifacts, 'card-termite', left, v.now, '', (cg, box) => {
+        drawStack(cg, box, termiteLayers(termite, 0), termiteFrame(termite, 0), { yaw, rgb: TERMITE_RGB, lineWidth: 0.7 });
+    });
+    else lines(g, [['termite form: link termite_slices.bin into data/', '#666']], { ...left, y: left.y + left.h / 3 }, s);
+    if (vessel) {
+        const printed = printedLayers(vessel, VESSEL_FACTS.printedMm);
+        cachedDraw(g, v.artifacts, 'card-vessel', right, v.now, String(v.vesselLayer), (cg, box) => {
+            drawStack(cg, box, vesselLayers(vessel), vesselFrame(vessel), {
+                yaw, rgb: CLAY_RGB, lineWidth: 0.7, currentIndex: v.vesselLayer, faintFrom: v.vesselLayer + 1,
+                dottedFrom: printed < vessel.layers.length ? printed : undefined,
+            });
+        });
+    } else {
+        lines(g, [['vessel: link vessel.gcode into data/', '#666']], { ...right, y: right.y + right.h / 3 }, s);
+    }
+    lines(g, [
+        [termite ? `termite form · PLA · ${termite.segments.length} segments` : 'termite form · not linked', '#bbb'],
+        [vessel ? `vessel · clay · layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈` : 'vessel · not linked', '#888'],
+        ['both made before the show', '#555'],
+    ], textBox, s);
 }
 
 function drawSound(g: G, b: Box, v: DrawInput) {

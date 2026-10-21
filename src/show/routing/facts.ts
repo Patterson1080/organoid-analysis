@@ -82,6 +82,12 @@ export const ROBOT_FACTS = {
     dormant: '/inject/arm1..3 · off in this show',
 };
 
+/** SIGGRAPH 2026 §Biome III: the termite form, from the same agents as Biome I. */
+export const FAB_FACTS = {
+    termite: { material: 'PLA', segments: 4, lattice: '100³', source: 'SIGGRAPH 2026' },
+    pipeline: '131 agents · 100³ lattice → point cloud → Poisson surface → 4 PLA segments',
+};
+
 /** The G-code's own header supplies layers, layer height, nozzle and size; these fill the rest. */
 export const VESSEL_FACTS = {
     file: 'single-object-436666.gcode',

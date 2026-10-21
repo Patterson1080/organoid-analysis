@@ -2,19 +2,21 @@
 // and a rail of all six media to step between them.
 
 import { firingCaption, pad6, sourceCaption } from '../../show/routing/captions';
-import { ATTRIBUTION, CARD_TITLES, LED_FACTS, MEDIA, ROBOT_FACTS, SOLENOID_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
+import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, MEDIA, ROBOT_FACTS, SOLENOID_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
 import type { MediumKey } from '../../show/routing/facts';
 import type { Box, DetailLayout } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
 import { expectedKicks } from '../../show/routing/maxPatch';
 import type { PatchData } from '../../show/routing/maxPatch';
 import { paperMappings } from '../../show/routing/soundFeatures';
+import { fabPanels } from '../../show/routing/sliceView';
 import { soundPanels } from '../../show/routing/soundLayout';
 import { printedLayers } from '../../show/routing/vessel';
-import { MONO, arrowHead, clipTo, fitSquare, frame, hangingArms, ledGrid, lines, neuronMap, rateLine, strikers, swarmPanel, text, vesselProfile, vesselTop } from './glyphs';
+import { MONO, arrowHead, clipTo, fitSquare, frame, hangingArms, ledGrid, lines, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
 import type { G } from './glyphs';
 import { firingCount, row } from './overview';
 import { activityStrip, grainsPerSecond, harmony, perSecond, rules, score, speakers } from './soundGlyphs';
+import { CLAY_RGB, TERMITE_RGB, TURN_MS, cachedDraw, drawStack, planView, schematic, termiteFrame, termiteLayers, vesselFrame, vesselLayers } from './artifactGlyphs';
 import type { DrawInput, SwarmKey } from './overview';
 
 const CLOSE_LABEL = '× ROUTING';
@@ -282,47 +284,119 @@ function robotSource(g: G, b: Box, v: DrawInput) {
     lines(g, [[ATTRIBUTION, '#5a5a5a']], { x: b.x, y: b.y + b.h - fontPx(10, s) * 3, w: b.w, h: fontPx(10, s) * 3 }, s, 10);
 }
 
-function fab(g: G, l: DetailLayout, v: DrawInput) {
-    const s = l.scale, st = storyTop(l), vessel = v.vessel;
-    if (!vessel) {
-        lines(g, [['no vessel data (data/vessel.gcode)', '#999'], ['the vessel is grown from this recording before the show; link its G-code into data/ to show the layer', '#666']], { ...st, y: st.y + st.h * 0.3 }, s, 10);
-    } else {
-        const px = fontPx(9, s);
-        const side: Box = { x: st.x + 40 * s, y: st.y + px, w: st.w * 0.22, h: st.h - 2 * px };
-        const printed = printedLayers(vessel, VESSEL_FACTS.printedMm);
-        vesselProfile(g, side, vessel, v.vesselLayer, printed);
-        text(g, `${Math.round(vessel.heightMm)} mm`, side.x - 6 * s, side.y - px / 2, px, '#666', 'right');
-        text(g, '0', side.x - 6 * s, side.y + side.h - px, px, '#666', 'right');
-        const z = Math.round((v.vesselLayer + 1) * vessel.layerMm);
-        const yk = side.y + side.h - ((v.vesselLayer + 0.5) / vessel.layers.length) * side.h;
-        text(g, `${z} mm`, side.x - 6 * s, yk - px / 2, px, '#fff', 'right');
-        if (printed < vessel.layers.length) text(g, 'not printed', side.x + side.w / 2, side.y, px, '#555', 'center');
-        const top: Box = { x: st.x + st.w * 0.3, y: st.y, w: st.w * 0.38, h: st.h };
-        vesselTop(g, top, vessel, v.vesselLayer, 24);
-        const info: Box = { x: st.x + st.w * 0.7, y: st.y, w: st.w * 0.3, h: st.h };
+const VIEW_MS = 12_000; // the termite form alternates: turning, then its four print segments
+const FADE_MS = 1000;
+const SWEEP_MS = 200; // a print-preview slice every 200 ms
+
+/** 1 while the turning view shows, 0 during the segments view, with a fade between. */
+function turningShare(now: number): number {
+    const t = now % (2 * VIEW_MS);
+    if (t < VIEW_MS - FADE_MS) return 1;
+    if (t < VIEW_MS) return 1 - (t - (VIEW_MS - FADE_MS)) / FADE_MS;
+    if (t < 2 * VIEW_MS - FADE_MS) return 0;
+    return (t - (2 * VIEW_MS - FADE_MS)) / FADE_MS;
+}
+
+/** The share of LED pixels lit now: the schematic's fibres carry their light. */
+function ledShare(cells: Float32Array): number {
+    let lit = 0;
+    for (const c of cells) if (c > 0.05) lit++;
+    return lit / Math.max(1, cells.length);
+}
+
+/** The termite form: turning, then exploded into its print segments with a print preview sweeping up. */
+function termitePanel(g: G, b: Box, v: DrawInput, yaw: number, s: number) {
+    const px = fontPx(9, s), capH = px * 1.45 * 4, t = v.termite;
+    text(g, `TERMITE FORM · ${FAB_FACTS.termite.material}`, b.x, b.y, px, '#ddd');
+    const area: Box = { x: b.x, y: b.y + px * 1.8, w: b.w, h: Math.max(8, b.h - px * 1.8 - capH - 6 * s) };
+    if (!t) {
+        lines(g, [['link termite_slices.bin into data/ (node scripts/termite-slices.mjs <mesh.obj>)', '#777']], { ...area, y: area.y + area.h / 3 }, s, 9);
+        return;
+    }
+    const turning = turningShare(v.now);
+    if (turning > 0) {
         g.save();
-        clipTo(g, info);
-        let y = lines(g, [
-            [`layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈`, '#fff'],
-            [`z ${z} mm`, '#bbb'],
-            ['linear in the recording: the sketch adds a layer only while a neuron fires', '#666'],
-            [`${VESSEL_FACTS.file} · ${vessel.layers.length} × ${vessel.layerMm} mm spiral · nozzle ${vessel.header.nozzle ?? '?'}`, '#888'],
-            [`${VESSEL_FACTS.clay} · ${VESSEL_FACTS.printer} (${VESSEL_FACTS.source})`, '#777'],
-        ], info, s, 9);
-        y += px;
-        const mounds: Box = { x: info.x, y, w: info.w, h: Math.min(px * 5, info.y + info.h - y) };
-        g.setLineDash([3 * s, 3 * s]);
-        frame(g, mounds, '#333');
-        g.setLineDash([]);
-        text(g, 'termite mounds · files to come', mounds.x + 6 * s, mounds.y + 6 * s, px, '#555');
+        g.globalAlpha *= turning;
+        cachedDraw(g, v.artifacts, 'fab-turning', area, v.now, '', (cg, box) => {
+            drawStack(cg, box, termiteLayers(t, 0), termiteFrame(t, 0), { yaw, rgb: TERMITE_RGB, lineWidth: 0.8 });
+        });
         g.restore();
     }
+    const explode = (t.bounds.maxY - t.bounds.minY) * 0.06, stack = termiteLayers(t, explode), f = termiteFrame(t, explode);
+    const sweep = Math.floor(v.now / SWEEP_MS) % Math.max(1, stack.length), current = stack[sweep];
+    if (turning < 1 && current) {
+        g.save();
+        g.globalAlpha *= 1 - turning;
+        cachedDraw(g, v.artifacts, 'fab-segments', area, v.now, String(sweep), (cg, box) => {
+            const at = drawStack(cg, box, stack, f, { yaw: 0.6, rgb: TERMITE_RGB, lineWidth: 0.8, currentIndex: sweep });
+            t.segments.forEach((seg, k) => text(cg, String(k + 1), box.x + 2 * s, at((seg.yMin + seg.yMax) / 2 + k * explode) - px / 2, px, '#bbb'));
+        });
+        const side = Math.min(area.w * 0.28, area.h * 0.3);
+        planView(g, { x: area.x + area.w - side, y: area.y, w: side, h: side }, current, f, TERMITE_RGB);
+        g.restore();
+    }
+    const seg = current ? current.segment : 0, inSeg = stack.filter(sl => sl.segment === seg), j = inSeg.indexOf(current);
+    const view = turning >= 0.5 ? 'turning · one turn every 48 s' : `PLA print preview · segment ${seg + 1} · slice ${j + 1} / ${inSeg.length}`;
+    g.save();
+    const cap: Box = { x: b.x, y: b.y + b.h - capH, w: b.w, h: capH };
+    clipTo(g, cap);
+    lines(g, [
+        [view, '#ccc'],
+        [FAB_FACTS.pipeline, '#888'],
+        [`${FAB_FACTS.termite.source} · made before the show, not on /index`, '#555'],
+    ], cap, s, 9);
+    g.restore();
+}
+
+/** The vessel: its G-code spiral, grown to the layer the playhead has reached (≈). */
+function vesselPanel(g: G, b: Box, v: DrawInput, yaw: number, s: number) {
+    const px = fontPx(9, s), vessel = v.vessel;
+    text(g, 'VESSEL · clay', b.x, b.y, px, '#ddd');
+    const body: Box = { x: b.x, y: b.y + px * 1.8, w: b.w, h: b.h - px * 1.8 };
+    if (!vessel) {
+        lines(g, [['link vessel.gcode into data/ to draw the vessel', '#777']], { ...body, y: body.y + body.h / 3 }, s, 9);
+        return;
+    }
+    const printed = printedLayers(vessel, VESSEL_FACTS.printedMm);
+    const art: Box = { ...body, w: body.w * 0.5 };
+    cachedDraw(g, v.artifacts, 'fab-vessel', art, v.now, String(v.vesselLayer), (cg, box) => {
+        drawStack(cg, box, vesselLayers(vessel), vesselFrame(vessel), {
+            yaw, rgb: CLAY_RGB, lineWidth: 0.8, currentIndex: v.vesselLayer, faintFrom: v.vesselLayer + 1,
+            dottedFrom: printed < vessel.layers.length ? printed : undefined,
+        });
+    });
+    const info: Box = { x: body.x + body.w * 0.54, y: body.y, w: body.w * 0.46, h: body.h };
+    const z = Math.round((v.vesselLayer + 1) * vessel.layerMm);
+    g.save();
+    clipTo(g, info);
+    lines(g, [
+        [`layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈`, '#fff'],
+        [`z ${z} mm${printed < vessel.layers.length ? ` · printed to layer ${printed}` : ''}`, '#bbb'],
+        ["each neuron's firing locally speeds the contour's growth; sampled layers stack into one spiral", '#888'],
+        ['linear in the recording: the sketch adds a layer only while a neuron fires', '#666'],
+        [`${vessel.layers.length} × ${vessel.layerMm} mm spiral · nozzle ${vessel.header.nozzle ?? '?'}`, '#777'],
+        [VESSEL_FACTS.file, '#666'],
+        [`${VESSEL_FACTS.clay} · ${VESSEL_FACTS.printer} (${VESSEL_FACTS.source})`, '#777'],
+    ], info, s, 9);
+    g.restore();
+}
+
+function fab(g: G, l: DetailLayout, v: DrawInput) {
+    const s = l.scale, st = storyTop(l), { termite, vessel } = v;
+    if (!termite && !vessel) {
+        lines(g, [['no artifact data (data/termite_slices.bin, data/vessel.gcode)', '#999'], ['both artifacts are grown from this recording before the show; link their files into data/ to draw them', '#666']], { ...st, y: st.y + st.h * 0.3 }, s, 10);
+    } else {
+        const p = fabPanels(st), yaw = (v.now / TURN_MS) * Math.PI * 2;
+        termitePanel(g, p.form, v, yaw, s);
+        vesselPanel(g, p.vessel, v, yaw, s);
+        schematic(g, p.schematic, ledShare(v.live.ledCells), s);
+    }
     chain(g, l.chain, [
-        ['recording', '131 neurons · 0–180 s'],
-        ['growth sim', '5 min · impulse per spike'],
-        ['layer on firing', vessel ? `${vessel.layers.length} layers` : '—'],
-        [vessel ? `${vessel.layers.length} × ${vessel.layerMm} mm` : 'spiral', 'one continuous spiral'],
-        ['G-code', `${VESSEL_FACTS.printer.split(' ')[0]} · stoneware`],
+        ['organoid', '131 · 180 s'],
+        ['termites · growth', 'same spikes'],
+        [`${FAB_FACTS.termite.lattice} lattice`, 'contours'],
+        [termite ? `${termite.segments.length} PLA parts` : 'PLA parts', vessel ? `${vessel.layers.length} clay layers` : 'clay layers'],
+        ['frame', 'installed'],
     ], s);
 }
 
@@ -345,7 +419,12 @@ export function drawRail(g: G, l: DetailLayout, v: DrawInput, active: MediumKey)
         if (key === 'solenoids') strikers(g, gb, live.strikeGlow);
         if (key === 'led') ledGrid(g, gb, live.ledCells, live.ledColor, live.ledAgeMs > LED_FACTS.idleMs);
         if (key === 'robot') hangingArms(g, gb, live.arms, s * 0.6);
-        if (key === 'fab' && v.vessel) vesselTop(g, gb, v.vessel, v.vesselLayer, 6);
+        if (key === 'fab' && v.termite) {
+            const t = v.termite;
+            cachedDraw(g, v.artifacts, 'rail-termite', gb, v.now, '', (cg, box) => {
+                drawStack(cg, box, termiteLayers(t, 0), termiteFrame(t, 0), { yaw: (v.now / TURN_MS) * Math.PI * 2, rgb: TERMITE_RGB, lineWidth: 0.6 });
+            });
+        } else if (key === 'fab' && v.vessel) vesselTop(g, gb, v.vessel, v.vesselLayer, 6);
         g.restore();
     }
 }
