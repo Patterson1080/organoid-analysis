@@ -368,8 +368,9 @@ function applyLedFrame(s: LiveState, frame: LedFrame) {
 }
 
 // The tendon curls the spine toward its side as the servo turns: these are the three drawn
-// segments' angles from vertical at full pull, the tip curling most.
-const CURL = [Math.PI * 0.22, Math.PI * 0.5, Math.PI * 0.8];
+// segments' angles from vertical at full pull, the tip curling most. 37.7 mm of tendon at 180°
+// (the rebuild's pulley) bends a long spine gently, so even full pull leaves the tip at about 45°.
+const CURL = [Math.PI * 0.06, Math.PI * 0.14, Math.PI * 0.25];
 
 /** Each arm runs the firmware's rules on the distance it reads: the arm's own reading when it reports
  *  one, else a stand-in visitor. Fresh telemetry overrides the angle and the touch; the drawn spine

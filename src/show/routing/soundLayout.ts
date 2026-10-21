@@ -35,7 +35,7 @@ export function soundPanels(story: Box): { score: Box; rules: Box; harmony: Box;
 /** The VOICES and OUTPUT captions: whatever the playhead does, the picks shown are drawn here. */
 export function soundCaptions(moving: boolean): { voices: string; output: string } {
     return {
-        voices: `${moving ? 'the last 10 s' : 'Max plays on at the last values'} · drawn like Max draws them`,
+        voices: `${moving ? 'the last 10 s' : 'silent while /index is still'} · drawn like Max draws them`,
         output: 'positions drawn like Max draws them',
     };
 }

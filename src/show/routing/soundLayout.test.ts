@@ -32,5 +32,5 @@ test('captions say the draws are simulated, playing or held', () => {
         assert.match(c.voices, /drawn like Max draws them/);
         assert.match(c.output, /drawn like Max draws them/);
     }
-    assert.match(soundCaptions(false).voices, /plays on at the last values/);
+    assert.match(soundCaptions(false).voices, /silent while \/index is still/);
 });

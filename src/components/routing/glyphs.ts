@@ -3,7 +3,7 @@
 
 import type { Box } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
-import type { Arm, LiveNeuron } from '../../show/routing/live';
+import type { LiveNeuron } from '../../show/routing/live';
 import type { Swarm } from '../../show/routing/swarm';
 import type { Vessel } from '../../show/routing/vessel';
 
@@ -193,52 +193,6 @@ export function ledGrid(g: G, b: Box, cells: Float32Array, colors: Uint8Array, i
         g.fillRect(sq.x + (i % 16) * c + c * 0.1, sq.y + Math.floor(i / 16) * c + c * 0.1, c * 0.8, c * 0.8);
     }
     frame(g, sq, '#262626');
-}
-
-/** Three arms hanging from a rail: the servo turns the top joint, the lower segments trail it. */
-export function hangingArms(g: G, b: Box, arms: Arm[], scale: number): void {
-    g.fillStyle = '#555';
-    g.fillRect(b.x, b.y, b.w, Math.max(1, 2 * scale));
-    const seg = (b.h - 16 * scale) / 3;
-    arms.forEach((arm, k) => {
-        let x = b.x + (k + 0.5) * (b.w / arms.length), y = b.y + 2 * scale;
-        g.fillStyle = arm.live.servo ? '#fff' : '#ddd';
-        g.fillRect(x - 3 * scale, y, 6 * scale, 4 * scale); // the servo
-        for (const th of arm.th) {
-            const nx = x + Math.sin(th) * seg, ny = y + Math.cos(th) * seg;
-            g.strokeStyle = '#d0d0d0';
-            g.lineWidth = 1.5 * scale;
-            g.beginPath();
-            g.moveTo(x, y);
-            g.lineTo(nx, ny);
-            g.stroke();
-            const mx = (x + nx) / 2, my = (y + ny) / 2, leaf = 6 * scale;
-            g.strokeStyle = '#666';
-            g.lineWidth = 1;
-            g.beginPath();
-            g.moveTo(mx, my); g.lineTo(mx + Math.cos(th) * leaf, my - Math.sin(th) * leaf + leaf / 2);
-            g.moveTo(mx, my); g.lineTo(mx - Math.cos(th) * leaf, my + Math.sin(th) * leaf + leaf / 2);
-            g.stroke();
-            x = nx;
-            y = ny;
-        }
-        text(g, `${Math.round(arm.servo)}°`, b.x + (k + 0.5) * (b.w / arms.length), b.y + b.h - fontPx(8, scale), fontPx(8, scale), '#888', 'center');
-    });
-}
-
-/** The vessel from the side: each layer's widest reach; grown layers brighter, the current one a line,
- *  and layers above the printed height ghosted. */
-export function vesselProfile(g: G, b: Box, v: Vessel, layer: number, printed: number): void {
-    const n = v.layers.length, sy = b.h / n, sx = b.w / 2 / v.maxRadius, cx = b.x + b.w / 2;
-    for (let j = 0; j < n; j++) {
-        const y = b.y + b.h - (j + 1) * sy, r = v.layers[j].radius * sx;
-        g.fillStyle = j >= printed ? 'rgba(255,255,255,0.05)' : j <= layer ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.14)';
-        g.fillRect(cx - r - 1, y, 1.5, Math.max(1, sy));
-        g.fillRect(cx + r - 0.5, y, 1.5, Math.max(1, sy));
-    }
-    const yk = Math.round(b.y + b.h - (layer + 0.5) * sy);
-    g.fillStyle = '#fff';
-    g.fillRect(cx - v.layers[layer].radius * sx - 4, yk, 2 * v.layers[layer].radius * sx + 8, 1);
 }
 
 /** The current layer's real contour from above, over the ones grown before it. */

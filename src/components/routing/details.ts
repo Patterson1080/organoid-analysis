@@ -1,17 +1,19 @@
 // One medium full size: its source, its story drawn large, the signal chain with live values,
 // and a rail of all six media to step between them.
 
-import { firingCaption, pad6, sourceCaption } from '../../show/routing/captions';
+import { firingCaption, pad6, sourceCaption, strikeCaption } from '../../show/routing/captions';
 import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, MEDIA, ROBOT_FACTS, SOLENOID_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
 import type { MediumKey } from '../../show/routing/facts';
 import type { Box, DetailLayout } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
+import { ARM_RULES, servoTarget } from '../../show/routing/arms';
 import type { PatchData } from '../../show/routing/maxPatch';
 import { paperMappings } from '../../show/routing/soundFeatures';
 import { fabPanels } from '../../show/routing/sliceView';
 import { soundCaptions, soundPanels } from '../../show/routing/soundLayout';
 import { printedLayers } from '../../show/routing/vessel';
-import { MONO, arrowHead, clipTo, fitSquare, frame, hangingArms, ledGrid, lines, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
+import { MONO, arrowHead, clipTo, fitSquare, frame, ledGrid, lines, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
+import { armRuleChart, armsPanel } from './armGlyphs';
 import type { G } from './glyphs';
 import { firingCount, row } from './overview';
 import { activityStrip, harmony, rateText, rules, score, speakers } from './soundGlyphs';
@@ -204,7 +206,7 @@ function solenoids(g: G, l: DetailLayout, v: DrawInput) {
     lines(g, [
         ['one solenoid per backbone neuron, in the ceramic vessels and suspended glassware', '#bbb'],
         [`Max sends line index + 1 of ${SOLENOID_FACTS.file} as <27 digits> to the ${SOLENOID_FACTS.board}; all off ${SOLENOID_FACTS.releaseMs} ms after the last line`, '#999'],
-        [live.strikeSource === 'live' ? `LIVE · ${live.strikes} strikes from the patch` : `≈ computed from the 27 backbone spike columns · ${live.strikes} strikes`, live.strikeSource === 'live' ? '#fff' : '#555'],
+        strikeCaption(live.strikeSource, v.mode, live.strikes),
         ...log,
     ], logBox, s, 9);
     g.restore();
@@ -244,41 +246,53 @@ function led(g: G, l: DetailLayout, v: DrawInput) {
 }
 
 function robot(g: G, l: DetailLayout, v: DrawInput) {
-    const s = l.scale, st = storyTop(l), live = v.live;
-    const armsBox: Box = { ...st, h: st.h * 0.62 };
-    hangingArms(g, armsBox, live.arms, s);
-    const textBox: Box = { x: st.x, y: armsBox.y + armsBox.h + 10 * s, w: st.w, h: st.y + st.h - (armsBox.y + armsBox.h + 10 * s) };
+    const s = l.scale, st = storyTop(l), live = v.live, px = fontPx(9, s);
+    const landscape = st.w / st.h >= 1.1;
+    const armsBox: Box = landscape ? { ...st, w: st.w * 0.56 } : { ...st, h: st.h * 0.55 };
+    armsPanel(g, armsBox, live.arms, s, { cone: true, labels: true });
+    const side: Box = landscape
+        ? { x: st.x + st.w * 0.6, y: st.y, w: st.w * 0.4, h: st.h }
+        : { x: st.x, y: st.y + st.h * 0.58, w: st.w, h: st.h * 0.42 };
+    text(g, 'THE RULE · distance → angle, past a 10° deadband', side.x, side.y, px, '#ddd');
+    const chart: Box = { x: side.x, y: side.y + px * 1.8, w: side.w, h: Math.min(side.h * 0.42, side.w * 0.6) };
+    armRuleChart(g, chart, live.arms, s);
+    const anyLive = live.arms.some(a => a.live.proximity || a.live.servo);
+    const below: Box = { x: side.x, y: chart.y + chart.h + px, w: side.w, h: side.y + side.h - (chart.y + chart.h + px) };
     g.save();
-    clipTo(g, textBox);
+    clipTo(g, below);
     lines(g, [
-        ...live.arms.map((a, k) => [`arm ${k + 1} · ${Math.round(a.cm)} cm · servo ${Math.round(a.servo)}°${a.touch ? ' · touched' : ''} · ${a.live.proximity ? 'LIVE' : 'simulated'}`, a.live.proximity ? '#fff' : '#999'] as [string, string]),
-        ['hung upside down: gravity swings each arm as its servo turns', '#777'],
-        ['→ sensor values over serial to Max, where they shape the composition', '#bbb'],
-        [`┄ ${ROBOT_FACTS.dormant}`, '#555'],
-        [live.arms.some(a => a.live) ? 'LIVE · from the audio computer' : ROBOT_FACTS.badge, live.arms.some(a => a.live) ? '#fff' : '#555'],
-    ], textBox, s, 9);
+        ...live.arms.map((a, k) => [
+            `arm ${k + 1} · ${Math.round(a.cm)} cm → ${servoTarget(a.cm)}° · servo ${Math.round(a.servo)}° · ${a.motion.phase}${a.touch ? ' · touched' : ''} · ${a.live.proximity || a.live.servo ? 'LIVE' : 'sim'}`,
+            a.live.proximity || a.live.servo ? '#fff' : '#999',
+        ] as [string, string]),
+        [`${ROBOT_FACTS.sketch}: ramps at 200°/s, settles 100 ms, then ignores the sensor for 2 s; serial to Max`, '#888'],
+        [`${ROBOT_FACTS.rebuild}: the same rules, touch-lit fibres, OSC to Max (9100) and here (3333, arms 1–3)`, '#777'],
+        ['hung upside down: the tendon curls the spine, gravity swings it back', '#777'],
+        [anyLive ? 'LIVE · from the arms' : ROBOT_FACTS.badge, anyLive ? '#fff' : '#555'],
+    ], below, s, 9);
     g.restore();
     chain(g, l.chain, [
-        ['visitor', 'proximity · touch'],
-        [ROBOT_FACTS.sensor, 'ultrasonic · leaves capacitive'],
-        ['Arduino', `→ ${ROBOT_FACTS.servo} 0–180°`],
-        ['serial', '→ Max/MSP'],
-        ['sound', 'the composition'],
+        ['visitor', 'within 1 m'],
+        ['ultrasonic', '0–100 cm · at the tip'],
+        ['map → servo', '10° deadband · 2 s rest'],
+        ['tendon → spine', 'hung upside down'],
+        ['serial · OSC', 'arm 1 → arpeggio'],
     ], s);
 }
 
 function robotSource(g: G, b: Box, v: DrawInput) {
-    const s = v.scale;
+    const s = v.scale, px = fontPx(9, s);
     text(g, 'VISITORS', b.x, b.y, fontPx(10, s), '#fff');
     const bars = row({ x: b.x, y: b.y + fontPx(10, s) * 2, w: b.w, h: Math.min(b.h * 0.6, 180 * s) }, v.live.arms.length, 10 * s);
     v.live.arms.forEach((a, k) => {
-        const c = bars[k], fill = Math.max(0, Math.min(1, 1 - a.cm / 100));
+        const c = bars[k], fill = Math.max(0, Math.min(1, 1 - a.cm / ARM_RULES.rangeCm));
         frame(g, c, '#222');
-        g.fillStyle = 'rgba(255,255,255,0.6)';
+        g.fillStyle = a.live.proximity ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)';
         g.fillRect(c.x + 2, c.y + c.h * (1 - fill), c.w - 4, c.h * fill);
-        text(g, `${k + 1}`, c.x + c.w / 2, c.y + c.h + 4 * s, fontPx(9, s), '#888', 'center');
+        if (fill === 0) text(g, 'nobody', c.x + c.w / 2, c.y + c.h - px * 1.4, fontPx(8, s), '#555', 'center');
+        text(g, `${k + 1} · ${Math.round(a.cm)} cm`, c.x + c.w / 2, c.y + c.h + 4 * s, px, a.live.proximity ? '#fff' : '#888', 'center');
     });
-    text(g, 'closer = taller', b.x, bars[0].y + bars[0].h + fontPx(9, s) * 2.2, fontPx(8, s), '#555');
+    text(g, 'closer = taller · 100 cm = nobody', b.x, bars[0].y + bars[0].h + px * 2.2, fontPx(8, s), '#555');
     lines(g, [[ATTRIBUTION, '#5a5a5a']], { x: b.x, y: b.y + b.h - fontPx(10, s) * 3, w: b.w, h: fontPx(10, s) * 3 }, s, 10);
 }
 
@@ -416,7 +430,7 @@ export function drawRail(g: G, l: DetailLayout, v: DrawInput, active: MediumKey)
         }
         if (key === 'solenoids') strikers(g, gb, live.strikeGlow);
         if (key === 'led') ledGrid(g, gb, live.ledCells, live.ledColor, live.ledAgeMs > LED_FACTS.idleMs);
-        if (key === 'robot') hangingArms(g, gb, live.arms, s * 0.6);
+        if (key === 'robot') armsPanel(g, gb, live.arms, s * 0.6, { cone: false, labels: false });
         if (key === 'fab' && v.termite) {
             const t = v.termite;
             cachedDraw(g, v.artifacts, 'rail-termite', gb, v.now, '', (cg, box) => {

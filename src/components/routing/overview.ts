@@ -2,7 +2,7 @@
 // the audio computer's group on the other, and the spokes between them.
 
 import { formatClock } from '../../show/showMath';
-import { firingCaption, pad6 } from '../../show/routing/captions';
+import { firingCaption, pad6, strikeCaption } from '../../show/routing/captions';
 import { ATTRIBUTION, CARD_TITLES, LED_FACTS, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../../show/routing/facts';
 import type { Box, RoutingLayout } from '../../show/routing/layout';
@@ -12,7 +12,8 @@ import type { PatchData } from '../../show/routing/maxPatch';
 import type { TermiteSlices } from '../../show/routing/termiteSlices';
 import { printedLayers } from '../../show/routing/vessel';
 import type { Vessel } from '../../show/routing/vessel';
-import { MONO, arrowHead, clipTo, frame, hangingArms, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, text } from './glyphs';
+import { MONO, arrowHead, clipTo, frame, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, text } from './glyphs';
+import { armPhaseText, armsPanel } from './armGlyphs';
 import type { G } from './glyphs';
 import { activityStrip, chordName, chordStrip, rateText } from './soundGlyphs';
 import { CLAY_RGB, TERMITE_RGB, TURN_MS, cachedDraw, drawStack, termiteFrame, termiteLayers, vesselFrame, vesselLayers } from './artifactGlyphs';
@@ -247,19 +248,19 @@ function drawSolenoids(g: G, b: Box, v: DrawInput) {
     lines(g, [
         [`${live.backboneSlots.length} backbone of ${live.neurons.length || '—'}`, '#aaa'],
         ['Max → Daisy Seed · <27 bits>', '#777'],
-        [live.strikeSource === 'live' ? `LIVE · ${live.strikes} strikes` : `≈ computed · ${live.strikes} strikes`, live.strikeSource === 'live' ? '#fff' : '#555'],
+        strikeCaption(live.strikeSource, v.mode, live.strikes),
     ], textBox, s);
 }
 
 function drawRobot(g: G, b: Box, v: DrawInput) {
     const s = v.scale, live = v.live, { glyph, textBox } = cardParts(b, s, 4);
-    hangingArms(g, glyph, live.arms, s);
+    armsPanel(g, glyph, live.arms, s, { cone: true, labels: false });
     const anyLive = live.arms.some(a => a.live.proximity || a.live.servo);
     lines(g, [
-        [`VISITORS (proximity, touch) → ${ROBOT_FACTS.sensor} → ${ROBOT_FACTS.servo} 0–180°`, '#aaa'],
-        [`${live.arms.map(a => `${Math.round(a.cm)} cm${a.touch ? ' · touch' : ''}`).join(' · ')}`, '#777'],
-        ['→ serial → Max → sound', '#bbb'],
-        [anyLive ? 'LIVE · from the audio computer' : ROBOT_FACTS.badge, anyLive ? '#fff' : '#555'],
+        ['visitor → ultrasonic 0–100 cm → servo 0–180°', '#aaa'],
+        [live.arms.map(armPhaseText).join(' · '), '#888'],
+        ['arm 1 → Max: the arpeggio\'s pace', '#bbb'],
+        [anyLive ? 'LIVE · from the arms' : ROBOT_FACTS.badge, anyLive ? '#fff' : '#555'],
     ], textBox, s);
 }
 
