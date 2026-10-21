@@ -1,7 +1,7 @@
 // Everything the routing view draws that changes from frame to frame, advanced from the
-// playhead: which neurons just spiked, what EoC's firing blob says, the solenoid strikes, the
-// population rate the patch listens to, the LED frame that went down the serial line, and the
-// robot arms. Pure apart from the clock the caller passes, so it runs under node --test.
+// playhead: which neurons just spiked, what EoC's firing blob says, the solenoid strikes, what
+// the sound patch reads and plays, the LED frame that went down the serial line, and the robot
+// arms. Pure apart from the clock the caller passes, so it runs under node --test.
 
 import type { Neuron, SpikeEvent } from '../../types';
 import { neuronBounds } from '../ledFrame.ts';
@@ -10,6 +10,13 @@ import { spikesBetween } from '../showMath.ts';
 import { BACKBONE_COUNT, LED_FACTS, ROBOT_FACTS, VISUAL_FACTS } from './facts.ts';
 import { firingRow } from './firingBlob.ts';
 import type { FiringBlob } from './firingBlob.ts';
+import {
+    PATCH, activityAt, arpIntervalMs, chordOf, chordStep, flagsIn, grainChance, grainLenBins, grainTickMs, kickMs, nextFlag,
+    showChordFlags, toneMs,
+} from './maxPatch.ts';
+import type { PatchData } from './maxPatch.ts';
+import { createSoundSim, stepSoundSim } from './soundEvents.ts';
+import type { SoundSim } from './soundEvents.ts';
 import { BURST_FRACTION, peakRate, populationRate, stepBurst } from './soundFeatures.ts';
 import type { BurstState } from './soundFeatures.ts';
 import { fresh } from './telemetry.ts';
@@ -30,6 +37,33 @@ export interface LiveInput {
     telemetry: Telemetry | null;
     dtMs: number;
     now: number;
+    patch: PatchData | null; // the sound patch's data buffers, when linked into data/
+    mode: 'show' | 'local';
+    pass: number;
+    range: { start: number; end: number }; // the indices a pass covers
+}
+
+/** What the sound patch reads at the last index it heard, and what it plays with it. */
+export interface SoundView {
+    source: 'patch' | 'fallback'; // fallback: no patch data for this index
+    heardIndex: number | null; // Max keeps the last /index it got (paused, OFF)
+    v: number;
+    a: number;
+    toneMs: number | null;
+    kickMs: number | null;
+    held: { tone: boolean; kick: boolean }; // no table entry here: Max is on an earlier value
+    grainTickMs: number | null;
+    grainLen: [number, number] | null;
+    grainChance: number; // per tick, at the LFO's midpoint
+    threshold: number; // 10 + 80√a
+    passFlags: number;
+    flagsSoFar: number;
+    nextFlag: number | null;
+    chordStep: number | null;
+    chordSource: 'computed' | 'live' | 'unknown';
+    arm1Cm: number | null; // fresh telemetry only: no arm, no arpeggio
+    arpMs: number | null;
+    sim: SoundSim;
 }
 
 export interface Arm {
@@ -75,6 +109,7 @@ export interface LiveState {
     ledFrames: number;
     ledAgeMs: number;
     arms: Arm[];
+    sound: SoundView;
 }
 
 const SPIKE_TAU_MS = 350;
@@ -88,6 +123,7 @@ const HISTORY = 160;
 const HISTORY_STEP_MS = 40;
 const STRIKE_LOG = 8;
 const SOUND_LIVE = ['harmony', 'tones', 'grains', 'kick'] as const;
+const GRAIN_LFO_MID = 0.5; // the grain gate's ≈125 s LFO has an unknown phase: drawn at its midpoint
 
 export function createLiveState(neurons: Neuron[], spikes: SpikeEvent[]): LiveState {
     const b = neuronBounds(neurons) ?? { minX: 0, maxX: 1, minY: 0, maxY: 1 };
@@ -115,6 +151,11 @@ export function createLiveState(neurons: Neuron[], spikes: SpikeEvent[]): LiveSt
         rateHistory: new Float32Array(HISTORY), rateHead: 0, rateClock: 0, rateSource: 'computed', soundLive: {},
         ledCells: new Float32Array(256), ledColor: new Uint8Array(256), ledLines: [], lastLedFrame: null, ledFrames: 0, ledAgeMs: 0,
         arms: Array.from({ length: ROBOT_FACTS.arms }, () => ({ th: [0, 0, 0], proximity: 0, servo: 90, live: false, touch: false })),
+        sound: {
+            source: 'fallback', heardIndex: null, v: 0, a: 0, toneMs: null, kickMs: null, held: { tone: false, kick: false },
+            grainTickMs: null, grainLen: null, grainChance: 0, threshold: 10, passFlags: 0, flagsSoFar: 0, nextFlag: null,
+            chordStep: null, chordSource: 'unknown', arm1Cm: null, arpMs: null, sim: createSoundSim(1),
+        },
     };
 }
 
@@ -214,7 +255,62 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
     s.ledAgeMs += dt;
     if (input.ledFrame && input.ledFrame !== s.lastLedFrame) applyLedFrame(s, input.ledFrame);
 
+    stepSound(s.sound, input, dt);
     stepArms(s, telemetry, now, dt);
+}
+
+/** The patch at the last index Max heard (it holds while /index is still), the chord its counter is
+ *  on, arm 1's arpeggio, and its voices played forward: Max's metros run on whatever happens. */
+function stepSound(sv: SoundView, input: LiveInput, dt: number) {
+    const { patch, telemetry, now, range } = input;
+    if (input.index !== null) sv.heardIndex = input.index;
+    const v = patch && sv.heardIndex !== null ? activityAt(patch, sv.heardIndex) : null;
+    const i = Math.floor(sv.heardIndex ?? 0);
+    if (patch && v !== null) {
+        const a = v / PATCH.activityScale, tone = toneMs(a), kick = kickMs(a);
+        sv.source = 'patch';
+        sv.v = v;
+        sv.a = a;
+        sv.held = { tone: tone === null, kick: kick === null };
+        sv.toneMs = tone ?? (patch.toneHeldMs[i] || null);
+        sv.kickMs = kick ?? (patch.kickHeldMs[i] || null);
+        sv.grainTickMs = grainTickMs(a) ?? sv.grainTickMs;
+        sv.grainLen = grainLenBins(a) ?? sv.grainLen;
+        sv.grainChance = grainChance(a, GRAIN_LFO_MID);
+        sv.threshold = 10 + 80 * Math.sqrt(a);
+        sv.passFlags = flagsIn(patch, range.start, range.end);
+        sv.flagsSoFar = flagsIn(patch, range.start, i);
+        const next = nextFlag(patch, i);
+        sv.nextFlag = next !== null && next <= range.end ? next : null;
+    } else {
+        sv.source = 'fallback';
+        sv.toneMs = sv.kickMs = sv.grainTickMs = null;
+        sv.grainLen = null;
+        sv.grainChance = 0;
+    }
+
+    // The counter's step: Max's own when it reports it; in the show, counted from the flags Max has
+    // been sent since pass 1; in local playback unknown (it sends too few indices to hit a flag).
+    const harmony = telemetry?.sound.harmony;
+    if (harmony && fresh(harmony, now)) {
+        sv.chordStep = Math.min(17, Math.max(0, Math.round(harmony.value)));
+        sv.chordSource = 'live';
+    } else if (patch && v !== null && input.mode === 'show') {
+        sv.chordStep = chordStep(showChordFlags(patch, input.pass, range.start, range.end, i));
+        sv.chordSource = 'computed';
+    } else {
+        sv.chordStep = null;
+        sv.chordSource = 'unknown';
+    }
+
+    const proximity = telemetry?.robot[0]?.proximity;
+    sv.arm1Cm = proximity && fresh(proximity, now) ? proximity.value : null;
+    sv.arpMs = sv.arm1Cm === null ? null : arpIntervalMs(sv.arm1Cm);
+
+    stepSoundSim(sv.sim, {
+        now, dtMs: dt, notes: sv.chordStep === null ? null : chordOf(sv.chordStep).notes,
+        toneMs: sv.toneMs, kickMs: sv.kickMs, grainTickMs: sv.grainTickMs, grainChance: sv.grainChance, grainLen: sv.grainLen, arpMs: sv.arpMs,
+    });
 }
 
 /** The frame as DualLED_Currents.ino draws it: at most perFrameCap commands; F:x,y is a cyan

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     NOTE_NAMES, activityAt, arpIntervalMs, chordOf, chordStep, expectedKicks, flagsIn, grainChance, grainLenBins,
-    grainSpeed, grainTickMs, kickMs, patchData, showChordFlags, toneMs,
+    grainSpeed, grainTickMs, kickMs, nextFlag, patchData, showChordFlags, toneMs,
 } from './maxPatch.ts';
 
 const near = (actual: number | null, expected: number) => assert.ok(actual !== null && Math.abs(actual - expected) < 1e-9, `${actual} ≉ ${expected}`);
@@ -87,4 +87,12 @@ test('show chord flags count only the show range', () => {
     assert.equal(flagsIn(p, 1, 1), 1);
     assert.equal(showChordFlags(p, 2, 0, 5, 3), 3);
     assert.equal(showChordFlags(p, 2, 2, 5, 3), 1);
+});
+
+test('the next flag after an index', () => {
+    const p = patchData(new Float32Array(6), new Float32Array([0, 1, 0, 0, 1, 0]));
+    assert.equal(nextFlag(p, 0), 1);
+    assert.equal(nextFlag(p, 1), 4);
+    assert.equal(nextFlag(p, 4), null);
+    assert.equal(nextFlag(p, 2.7), 4);
 });

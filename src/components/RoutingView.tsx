@@ -15,6 +15,7 @@ import type { Swarm } from '../show/routing/swarm';
 import type { Telemetry } from '../show/routing/telemetry';
 import { createTour, setTourEnabled, tourCurrent, tourInteract, tourPaused, tourProgress, tourTick } from '../show/routing/tour';
 import type { TourState } from '../show/routing/tour';
+import type { PatchData } from '../show/routing/maxPatch';
 import { layerForIndex } from '../show/routing/vessel';
 import type { Vessel } from '../show/routing/vessel';
 import { loadRoutingSettings, saveRoutingSettings } from '../utils/routingSettings';
@@ -35,6 +36,7 @@ interface RoutingViewProps {
     telemetryRef: MutableRefObject<Telemetry>;
     firingBlob: FiringBlob | null;
     vessel: Vessel | null;
+    patch: PatchData | null;
     connected: boolean;
     presentation: boolean;
     height?: number; // overrides the sizing below
@@ -57,7 +59,7 @@ const inside = (b: Box, x: number, y: number) => x >= b.x && x <= b.x + b.w && y
 
 /** Where the show's signal goes and how each medium maps it, drawn live from the playhead. */
 export function RoutingView(props: RoutingViewProps) {
-    const { neurons, spikes, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel, presentation } = props;
+    const { neurons, spikes, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel, patch, presentation } = props;
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const tourTextRef = useRef<HTMLSpanElement>(null);
@@ -194,7 +196,7 @@ export function RoutingView(props: RoutingViewProps) {
         };
 
         const draw = (ts: number, dtMs: number) => {
-            const { index, phase, mode, offRemainingMs } = routingPlayhead(showLatestRef.current, connectedRef.current, playbackTimeRef.current, neurons.length > 0, ts);
+            const { index, phase, mode, offRemainingMs, pass, range } = routingPlayhead(showLatestRef.current, connectedRef.current, playbackTimeRef.current, neurons.length > 0, ts);
             if (index !== null) parked = index;
 
             // The tour picks the view while it runs; a pause leaves the manual choice; when the
@@ -215,7 +217,7 @@ export function RoutingView(props: RoutingViewProps) {
             }
             if (tourBarRef.current) tourBarRef.current.style.width = `${Math.round(tourProgress(tour, ts) * 100)}%`;
 
-            advanceLive(live, { index, spikes, blob: firingBlob, ledFrame: ledFrameRef.current, telemetry: telemetryRef.current, dtMs, now: ts });
+            advanceLive(live, { index, spikes, blob: firingBlob, ledFrame: ledFrameRef.current, telemetry: telemetryRef.current, dtMs, now: ts, patch, mode, pass, range });
             const frames = dtMs / (1000 / 60);
             fleeSources(swarms.termites.swarm, live.firing, VISUAL_FACTS.threshold, flee);
             for (const k of SWARM_KEYS) {
@@ -230,6 +232,7 @@ export function RoutingView(props: RoutingViewProps) {
                 live,
                 swarms: canvases,
                 vessel,
+                patch,
                 vesselLayer: vessel ? layerForIndex(vessel, parked ?? 0) : 0,
                 index,
                 mode,
@@ -246,7 +249,7 @@ export function RoutingView(props: RoutingViewProps) {
         };
         raf = requestAnimationFrame(frame);
         return () => cancelAnimationFrame(raf);
-    }, [shown, width, height, live, swarms, neurons, spikes, firingBlob, vessel, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef]);
+    }, [shown, width, height, live, swarms, neurons, spikes, firingBlob, vessel, patch, showLatestRef, playbackTimeRef, ledFrameRef, telemetryRef]);
 
     const local = (e: ReactPointerEvent<HTMLCanvasElement>) => {
         const r = e.currentTarget.getBoundingClientRect();

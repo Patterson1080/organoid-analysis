@@ -23,6 +23,9 @@ import { parseFiringBlob } from './show/routing/firingBlob';
 import type { FiringBlob } from './show/routing/firingBlob';
 import { consumeRoutingOsc, createTelemetry } from './show/routing/telemetry';
 import { parseVesselGcode } from './show/routing/vessel';
+import { patchData } from './show/routing/maxPatch';
+import type { PatchData } from './show/routing/maxPatch';
+import { parseWav16 } from './show/routing/wav';
 import type { Vessel } from './show/routing/vessel';
 import { parseNeuronCSV, parseSpikeCSV } from './utils/dataProcessing';
 import { playMultipleClicks, playBassPulse } from './utils/audioUtils';
@@ -154,6 +157,7 @@ function App() {
     const routingTelemetryRef = useRef(createTelemetry());
     const [firingBlob, setFiringBlob] = useState<FiringBlob | null>(null);
     const [vessel, setVessel] = useState<Vessel | null>(null);
+    const [patch, setPatch] = useState<PatchData | null>(null);
     const showRunning = !!showState?.running;
     const showOn = showRunning && showState?.phase === 'on';
 
@@ -516,6 +520,11 @@ function App() {
             if (status.vessel) {
                 fetch(`${base}/vessel.gcode`).then(r => r.text()).then(t => setVessel(parseVesselGcode(t)))
                     .catch(e => console.warn('data/vessel.gcode:', e));
+            }
+            if (status.activity && status.bursts) {
+                const wav = (name: string) => fetch(`${base}/${name}`).then(r => r.arrayBuffer()).then(parseWav16);
+                Promise.all([wav('activitylevel.wav'), wav('burstflags.wav')]).then(([activity, bursts]) => setPatch(patchData(activity, bursts)))
+                    .catch(e => console.warn('data/activitylevel.wav + burstflags.wav:', e));
             }
             if (!status.neurons && !status.spikes) return;
             setBridgeDataStatus('Loading data/ from the bridge…');
@@ -1444,6 +1453,7 @@ function App() {
                                 telemetryRef={routingTelemetryRef}
                                 firingBlob={firingBlob}
                                 vessel={vessel}
+                                patch={patch}
                             />
                         </div>
                     )}

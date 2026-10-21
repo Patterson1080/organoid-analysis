@@ -82,3 +82,9 @@ test('a shrinking interval does not replay the backlog', () => {
     stepSoundSim(sim, base({ now: 166, dtMs: 16, grainTickMs: 6.25, grainChance: 1, grainLen: [25, 50] }));
     assert.ok(eventsSince(sim, -Infinity).filter(e => e.kind === 'grain').length <= 3);
 });
+
+test('without a chord, events still tick, unpitched', () => {
+    const events = run(10, { notes: null, toneMs: 200, arpMs: 265 });
+    assert.deepEqual(events.filter(e => e.kind === 'tone').map(e => e.pc), [-1, -1, -1, -1, -1]);
+    assert.deepEqual(events.filter(e => e.kind === 'arp').map(e => e.pc), [-1, -1, -1]);
+});

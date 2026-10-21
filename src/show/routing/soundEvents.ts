@@ -38,7 +38,7 @@ export interface SoundSim {
 export interface SimInput {
     now: number;
     dtMs: number;
-    notes: readonly number[] | null; // the current chord; null → nothing pitched plays
+    notes: readonly number[] | null; // the current chord; null (not known here) → events tick unpitched
     toneMs: number | null;
     kickMs: number | null;
     grainTickMs: number | null;
@@ -53,6 +53,7 @@ const DRONES = 6;
 const POSITIONS = 17; // `random 17 → gate~ 16`: 0 closes the gate
 const DRONE_GAP_MS = 1000; // fzero~ listens for a second before the sine takes the pitch
 const ECHO_STAGES = 3;
+const CHORD_NOTES = 5; // coll notes holds 5 per chord
 
 /** mulberry32, its state kept in the sim. */
 function rand(sim: SoundSim): number {
@@ -156,12 +157,12 @@ export function stepSoundSim(sim: SoundSim, input: SimInput): void {
 
     const tones: number[] = [];
     sim.toneClock = metro(sim.toneClock, input.toneMs, dt, now, tones);
-    if (notes) for (const at of tones) push(sim, event('tone', at, { pc: pitch(), position: randInt(sim, POSITIONS) }));
+    for (const at of tones) push(sim, event('tone', at, { pc: pitch(), position: randInt(sim, POSITIONS) }));
 
     const grains: number[] = [];
     sim.grainClock = metro(sim.grainClock, input.grainTickMs, dt, now, grains);
     const len = input.grainLen;
-    if (notes && len) {
+    if (len) {
         for (const at of grains) {
             if (rand(sim) >= input.grainChance) continue;
             const lenMs = len[randInt(sim, 2)];
@@ -175,12 +176,10 @@ export function stepSoundSim(sim: SoundSim, input: SimInput): void {
 
     const arps: number[] = [];
     sim.arpClock = metro(sim.arpClock, input.arpMs, dt, now, arps);
-    if (notes) {
-        for (const at of arps) {
-            const octave = PATCH.arpOctaves[randInt(sim, PATCH.arpOctaves.length)] / 12 - 1;
-            push(sim, event('arp', at, { pc: notes[sim.arpStep] % 12, octave, position: -1 }));
-            sim.arpStep = (sim.arpStep + 1) % notes.length;
-        }
+    for (const at of arps) {
+        const octave = PATCH.arpOctaves[randInt(sim, PATCH.arpOctaves.length)] / 12 - 1;
+        push(sim, event('arp', at, { pc: notes ? notes[sim.arpStep] % 12 : -1, octave, position: -1 }));
+        sim.arpStep = (sim.arpStep + 1) % CHORD_NOTES; // counter 0 4 steps whether or not the chord is known
     }
 
     for (const v of sim.drones) {

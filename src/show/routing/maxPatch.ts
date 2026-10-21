@@ -115,6 +115,12 @@ function flagsThrough(p: PatchData, i: number): number {
     return lo;
 }
 
+/** The first flag after this index, or null. */
+export function nextFlag(p: PatchData, index: number): number | null {
+    const k = flagsThrough(p, Math.floor(index));
+    return k < p.flags.length ? p.flags[k] : null;
+}
+
 /** Flags with start ≤ index ≤ end. */
 export const flagsIn = (p: PatchData, start: number, end: number) =>
     Math.max(0, flagsThrough(p, Math.floor(end)) - flagsThrough(p, Math.floor(start) - 1));
