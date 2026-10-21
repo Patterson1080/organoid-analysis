@@ -12,7 +12,7 @@ import { NOTE_NAMES, PATCH, chordAt, grainSpeed, grainTickMs, kickMs, toneMs } f
 import type { PatchData } from '../../show/routing/maxPatch';
 import { droneLevel, eventsSince } from '../../show/routing/soundEvents';
 import { activityEnvelope, soundCaptions } from '../../show/routing/soundLayout';
-import { LINE_H, clippedLines, frame, text } from './glyphs';
+import { LINE_H, clippedLines, fit, frame, text } from './glyphs';
 import type { G } from './glyphs';
 
 const SCORE_WINDOW_MS = 10_000;
@@ -83,8 +83,8 @@ export function chordStrip(g: G, b: Box, step: number | null, s: number): void {
 export function chordName(g: G, b: Box, sv: SoundView, s: number): void {
     const c = chordAt(sv.chordStep);
     const big = Math.max(fontPx(9, s), Math.min(fontPx(30, s), b.h * 0.5)), small = fontPx(8, s);
-    text(g, c ? c.name : '?', b.x + b.w / 2, b.y, big, c ? '#fff' : '#555', 'center');
-    clippedLines(g, [[c ? noteNames(c.notes) : 'chord unknown here', c ? '#bbb' : '#666']], { ...b, y: b.y + big * 1.1, h: b.h }, s, 8, { ...b, y: b.y + big * 1.05, h: b.h - big * 1.05 });
+    text(g, c ? c.name : '?', b.x + b.w / 2, b.y, big, c ? '#fff' : '#777', 'center');
+    clippedLines(g, [[c ? noteNames(c.notes) : 'chord unknown here', c ? '#bbb' : '#777']], { ...b, y: b.y + big * 1.1, h: b.h }, s, 8, { ...b, y: b.y + big * 1.05, h: b.h - big * 1.05 });
     if (sv.chordSource !== 'unknown') text(g, sv.chordSource === 'live' ? 'LIVE' : '≈', b.x + b.w, b.y, small, sv.chordSource === 'live' ? '#fff' : '#777', 'right');
 }
 
@@ -123,11 +123,11 @@ export function score(g: G, b: Box, sv: SoundView, now: number, s: number): void
             g.fillRect(lane.x, y - rowH / 2, lane.w, rowH);
         }
         const stagger = pc % 2 ? 0 : 18 * s; // neighbouring rows alternate columns
-        if (on || rowH >= px) text(g, NOTE_NAMES[pc], lane.x - 4 * s - stagger, y - rowPx / 2, rowPx, on ? '#ccc' : '#444', 'right');
+        if (on || rowH >= px) text(g, NOTE_NAMES[pc], lane.x - 4 * s - stagger, y - rowPx / 2, rowPx, on ? '#ccc' : '#777', 'right');
     }
     text(g, 'grains', b.x + 4 * s, grainBand.y, px, '#777');
     text(g, 'kick', b.x + 4 * s, kickBand.y + kickBand.h - px * 2.2, px, '#777');
-    text(g, 'C1/D♭1', b.x + 4 * s, kickBand.y + kickBand.h - px, px, '#555');
+    text(g, 'C1/D♭1', b.x + 4 * s, kickBand.y + kickBand.h - px, px, '#777');
 
     for (const v of sv.sim.drones) {
         const level = sv.playing ? droneLevel(v, now) : 0; // the room is silent while /index is still
@@ -187,17 +187,17 @@ export function rules(g: G, b: Box, sv: SoundView, s: number): void {
         [x => toneMs(x * x), Math.sqrt(sv.a), [PATCH.toneMs[0], PATCH.toneMs[11]], [
             ['TONES · √a → 12 steps', '#ddd'],
             [`${ms(sv.toneMs)}${sv.held.tone ? ' (held)' : ''} · ${rateText(sv.rates.tones)}`, '#aaa'],
-            ['a note of the chord', '#666'],
+            ['a note of the chord', '#777'],
         ]],
         [x => grainTickMs(x ** 8), sv.a ** (1 / 8), [PATCH.grainMs[0], PATCH.grainMs[5]], [
             ['GRAINS · a^⅛ → tick', '#ddd'],
             [`${ms(sv.grainTickMs)} · ${Math.round(sv.grainChance * 100)} % · ${rateText(sv.rates.grains, 0)}`, '#aaa'],
-            [sv.grainLen ? `${sv.grainLen[0]}|${sv.grainLen[1]} ms, ×${grainSpeed(sv.grainLen[0])}|×${grainSpeed(sv.grainLen[1])}` : '—', '#666'],
+            [sv.grainLen ? `${sv.grainLen[0]}|${sv.grainLen[1]} ms, ×${grainSpeed(sv.grainLen[0])}|×${grainSpeed(sv.grainLen[1])}` : '—', '#777'],
         ]],
         [x => kickMs(x), sv.a, [PATCH.kickMs[0], PATCH.kickMs[5]], [
             ['KICK · a → 6 steps', '#ddd'],
             [`${ms(sv.kickMs)}${sv.held.kick ? ' (held)' : ''} · ${rateText(sv.rates.kick)}`, '#aaa'],
-            ['half gated silent', '#666'],
+            ['half gated silent', '#777'],
         ]],
     ];
     const cells = row({ ...b, h: b.h - foot }, charts.length, gap);
@@ -206,7 +206,7 @@ export function rules(g: G, b: Box, sv: SoundView, s: number): void {
         stepChart(g, { ...cell, h: Math.max(8, cell.h - capH - 4 * s) }, fn, x, range, s);
         clippedLines(g, caption, { ...cell, y: cell.y + cell.h - capH, h: capH }, s, 8);
     });
-    clippedLines(g, [['grain chance ×(1 − LFO): a 125 s swell of unknown phase, drawn at its midpoint', '#555']], { ...b, y: b.y + b.h - foot + px * 0.3, h: foot }, s, 8, { ...b, y: b.y + b.h - foot, h: foot });
+    clippedLines(g, [['grain chance ×(1 − LFO): a 125 s swell of unknown phase, drawn at its midpoint', '#777']], { ...b, y: b.y + b.h - foot + px * 0.3, h: foot }, s, 8, { ...b, y: b.y + b.h - foot, h: foot });
 }
 
 
@@ -230,7 +230,7 @@ export function harmony(g: G, b: Box, sv: SoundView, index: number | null, mode:
         ['one step per burst flag', '#888'],
         [where, '#aaa'],
         source,
-        ['C minor, Phrygian inflections · distorted guitar, a sample per note', '#666'],
+        ['C minor, Phrygian inflections · distorted guitar, a sample per note', '#777'],
     ], below, s);
 }
 
@@ -249,7 +249,7 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
     }
     if (sv.playing) for (const v of sv.sim.drones) if (v.position > 0) glow[v.position] = Math.max(glow[v.position], droneLevel(v, now) * 0.35);
 
-    text(g, 'OUTPUT · 16 positions → speakers 3–6', b.x, b.y, fontPx(9, s), '#ddd');
+    text(g, fit(g, 'OUTPUT · 16 positions → speakers 3–6', b.w, fontPx(9, s)), b.x, b.y, fontPx(9, s), '#ddd');
     const top = b.y + px * 2.2, rowH = Math.min((b.h - px * 6) / 3, 34 * s), spk = Math.min(rowH, 22 * s);
     const pairs: [string, string, number, number | null][] = [['3', '4', 1, 17], ['5', '6', 9, null]]; // out18 never gets a kick
     pairs.forEach(([l, r, first, kickPos], k) => {
@@ -294,8 +294,8 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
     clippedLines(g, [
         [soundCaptions(true).output, '#777'],
         [`${unrouted} unrouted in 10 s (gate 0)`, '#777'],
-        ['arm 1: a note every 15 + 1000·(d/100)² ms, up the chord, C3–C5', '#666'],
-        [`patch ${SOUND_FACTS.patchFile}`, '#555'],
-        [`arm 1 ${SOUND_FACTS.serialFile}`, '#555'],
+        ['arm 1: a note every 15 + 1000·(d/100)² ms, up the chord, C3–C5', '#777'],
+        [`patch ${SOUND_FACTS.patchFile}`, '#777'],
+        [`arm 1 ${SOUND_FACTS.serialFile}`, '#777'],
     ], foot, s, 8);
 }

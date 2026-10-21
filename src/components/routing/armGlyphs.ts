@@ -135,8 +135,8 @@ export function armRuleChart(g: G, b: Box, arms: Arm[], s: number): void {
         g.fill();
         text(g, String(k + 1), x + 5 * s, Y(arm.servo) - px, px, '#ccc');
     });
-    text(g, '0', plot.x, plot.y + plot.h + 2 * s, px, '#666');
-    text(g, '100 cm', plot.x + plot.w, plot.y + plot.h + 2 * s, px, '#666', 'right');
-    text(g, '180°', plot.x - 3 * s, plot.y, px, '#666', 'right');
-    text(g, '0°', plot.x - 3 * s, plot.y + plot.h - px, px, '#666', 'right');
+    text(g, '0', plot.x, plot.y + plot.h + 2 * s, px, '#777');
+    text(g, '100 cm', plot.x + plot.w, plot.y + plot.h + 2 * s, px, '#777', 'right');
+    text(g, '180°', plot.x - 3 * s, plot.y, px, '#777', 'right');
+    text(g, '0°', plot.x - 3 * s, plot.y + plot.h - px, px, '#777', 'right');
 }

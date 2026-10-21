@@ -21,6 +21,22 @@ export function text(g: G, s: string, x: number, y: number, px: number, color: s
     g.fillText(s, x, y);
 }
 
+/** A word cut into pieces no wider than `w` (a file name in a narrow column), in the current font. */
+function pieces(g: G, word: string, w: number): string[] {
+    if (g.measureText(word).width <= w) return [word];
+    const out: string[] = [];
+    let cur = '';
+    for (const ch of word) {
+        if (cur && g.measureText(cur + ch).width > w) {
+            out.push(cur);
+            cur = ch;
+        } else {
+            cur += ch;
+        }
+    }
+    return [...out, cur];
+}
+
 /** The rows as lines() draws them: each wrapped at spaces to `w` in the font at `px`. */
 function wrapped(g: G, rows: [string, string][], w: number, px: number): [string, string][] {
     g.font = `${px}px ${MONO}`;
@@ -32,7 +48,7 @@ function wrapped(g: G, rows: [string, string][], w: number, px: number): [string
             continue;
         }
         let line = '';
-        for (const word of s.split(' ')) {
+        for (const word of s.split(' ').flatMap(word => pieces(g, word, w))) {
             const next = line ? `${line} ${word}` : word;
             if (line && g.measureText(next).width > w) {
                 out.push([line, color]);
@@ -68,6 +84,29 @@ export function clippedLines(g: G, rows: [string, string][], b: Box, scale: numb
     clipTo(g, clip);
     lines(g, rows, b, scale, base);
     g.restore();
+}
+
+/** clippedLines() that never loses `last` (a LIVE/SIMULATED badge): when everything doesn't fit, the
+ *  rows above give way, whole lines at a time, and `last` follows the ones that still fit. */
+export function linesKeepLast(g: G, rows: [string, string][], last: [string, string][], b: Box, scale: number, base = 9): void {
+    const all = [...rows, ...last];
+    if (linesHeight(g, all, b.w, scale, base) <= b.h) {
+        clippedLines(g, all, b, scale, base);
+        return;
+    }
+    const lineH = fontPx(base, scale) * LINE_H, lastH = Math.min(b.h, linesHeight(g, last, b.w, scale, base));
+    const rowsH = Math.floor((b.h - lastH) / lineH) * lineH;
+    clippedLines(g, rows, { ...b, h: rowsH }, scale, base);
+    clippedLines(g, last, { ...b, y: b.y + rowsH, h: lastH }, scale, base);
+}
+
+/** `s` cut to `maxW` with an ellipsis, in the font at `px` (which it sets). */
+export function fit(g: G, s: string, maxW: number, px: number): string {
+    g.font = `${px}px ${MONO}`;
+    if (g.measureText(s).width <= maxW) return s;
+    let out = s;
+    while (out.length > 1 && g.measureText(`${out}…`).width > maxW) out = out.slice(0, -1);
+    return out.length > 1 ? `${out}…` : '';
 }
 
 /** A tag's size around this label; sets the font. */

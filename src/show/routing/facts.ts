@@ -73,12 +73,14 @@ export const LED_FACTS = { trail: LED_TRAIL_LENGTH, burstOver: 5, perFrameCap: 1
  *  board; all zeros 32 ms after the last line. The file isn't on this machine, so strikes stay ≈. */
 export const SOLENOID_FACTS = { file: 'backboneSpikes.txt', board: 'Daisy Seed', baud: 9600, releaseMs: 32 };
 
-/** The arms in this show: dev/arms/ProximityServoArms_Currents.ino on one board, read by Max over
- *  serial; the modular rebuild (dev/arms/modular) mirrors arms 1–3 to the bridge as /routing/robot/…. */
+/** The arms in this show: most likely the modular rebuild (dev/arms/modular), shown three times since
+ *  CURRENTS ran dev/arms/ProximityServoArms_Currents.ino (the team's word). Both move by the same rules;
+ *  the rebuild sends Max OSC (9100) or legacy serial `sensordata:` lines, which the Max serial patch
+ *  routes (the sketch's `proximitydata:` it doesn't), and mirrors arms 1–3 here as /routing/robot/…. */
 export const ROBOT_FACTS = {
     arms: 3,
-    sketch: 'ProximityServoArms_Currents.ino',
     rebuild: 'Haptophylla modular',
+    sketch: 'ProximityServoArms_Currents.ino',
     badge: "SIMULATED · the firmware's rules, stand-in visitors",
     dormant: '/inject/arm1..3 · off in this show',
 };

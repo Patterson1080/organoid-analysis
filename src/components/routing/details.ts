@@ -14,7 +14,7 @@ import { paperMappings } from '../../show/routing/soundFeatures';
 import { soundCaptions, soundPanels } from '../../show/routing/soundLayout';
 import { SWARM_KEYS } from '../../show/routing/swarm';
 import { printedLayers } from '../../show/routing/vessel';
-import { LINE_H, MONO, arrowHead, clipTo, clippedLines, fitSquare, frame, ledGrid, lines, linesHeight, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
+import { LINE_H, MONO, arrowHead, clipTo, clippedLines, fit, fitSquare, frame, ledGrid, lines, linesHeight, linesKeepLast, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
 import type { G } from './glyphs';
 import { armRuleChart, armsPanel } from './armGlyphs';
 import type { DrawInput } from './overview';
@@ -31,11 +31,13 @@ export function closeBox(l: DetailLayout): Box {
 
 /** Boxes in a row joined by arrows: [title, live value] each. */
 function chain(g: G, b: Box, items: [string, string][], s: number) {
-    const gap = 14 * s, h = Math.min(b.h, 46 * s);
+    const gap = 14 * s, rows = items.map(([title, value]): [string, string][] => [[title, '#e6e6e6'], [value, '#888']]);
+    const textW = (b.w - gap * (items.length - 1)) / items.length - 12 * s; // a narrow cell wraps: it grows to fit, up to the chain box
+    const h = Math.min(b.h, Math.max(46 * s, ...rows.map(r => linesHeight(g, r, textW, s) + 12 * s)));
     const cells = row({ x: b.x, y: b.y + (b.h - h) / 2, w: b.w, h }, items.length, gap);
     cells.forEach((c, i) => {
         frame(g, c, '#333');
-        clippedLines(g, [[items[i][0], '#e6e6e6'], [items[i][1], '#888']], { x: c.x + 6 * s, y: c.y + 6 * s, w: c.w - 12 * s, h: c.h - 12 * s }, s, 9, c);
+        clippedLines(g, rows[i], { x: c.x + 6 * s, y: c.y + 6 * s, w: c.w - 12 * s, h: c.h - 12 * s }, s, 9, c);
         if (i < cells.length - 1) {
             const y = c.y + c.h / 2, x0 = c.x + c.w + 2, x1 = c.x + c.w + gap - 2;
             g.strokeStyle = '#666';
@@ -50,9 +52,8 @@ function chain(g: G, b: Box, items: [string, string][], s: number) {
 }
 
 function header(g: G, l: DetailLayout, key: MediumKey) {
-    const s = l.scale, { title, sub } = CARD_TITLES[key];
-    text(g, `${title} · ${sub}`, l.header.x, l.header.y + 4 * s, fontPx(13, s), '#fff');
-    const c = closeBox(l);
+    const s = l.scale, { title, sub } = CARD_TITLES[key], c = closeBox(l), px = fontPx(13, s);
+    text(g, fit(g, `${title} · ${sub}`, c.x - l.header.x - 12 * s, px), l.header.x, l.header.y + 4 * s, px, '#fff');
     text(g, CLOSE_LABEL, c.x + c.w, c.y + 4 * s, fontPx(11, s), '#bbb', 'right');
 }
 
@@ -106,7 +107,7 @@ function visual(g: G, l: DetailLayout, v: DrawInput) {
         [v.showConfig ? passCaption(v.showConfig) : 'pass  /sim_resetSimsOnly → /sim_on 5 → T ×5 · P ×10 → /sim_off 5 → 2 min dark, sims paused', '#777'],
         ['one pass = one day: the diurnal sun sweeps the temperature field once per /index pass', '#777'],
         [`out  ${VISUAL_OUTPUT_CHAINS[v.visualOutput].join(' → ')}`, '#bbb'],
-        [VISUAL_FACTS.drawnNote, '#555'],
+        [VISUAL_FACTS.drawnNote, '#777'],
     ], below, s);
     chain(g, l.chain, [
         [indexLabel(v.index), v.fps === null ? 'OSC int · one a frame' : `OSC int · ${v.fps}/s`],
@@ -130,7 +131,7 @@ function bar(g: G, b: Box, t: number, label: string, s: number) {
 /** The patch at the playhead: the voices as they play, the rules that pace them, the chord, the speakers. */
 function soundFromPatch(g: G, l: DetailLayout, v: DrawInput, patch: PatchData) {
     const s = l.scale, sv = v.live.sound, p = soundPanels(storyTop(l)), px = fontPx(9, s);
-    text(g, `VOICES · ${soundCaptions(v.live.moving).voices}`, p.score.x, p.score.y, px, '#ddd');
+    text(g, fit(g, `VOICES · ${soundCaptions(v.live.moving).voices}`, p.score.w, px), p.score.x, p.score.y, px, '#ddd');
     const strip: Box = { x: p.score.x, y: p.score.y + px * 1.6, w: p.score.w, h: Math.max(8, p.score.h * 0.14) };
     activityStrip(g, strip, patch, v.range, sv.heardIndex, s);
     const below = strip.y + strip.h + 6 * s;
@@ -153,7 +154,7 @@ function sound(g: G, l: DetailLayout, v: DrawInput) {
     const graph: Box = { ...st, h: st.h * 0.34 };
     frame(g, graph, '#222');
     rateLine(g, { x: graph.x + 4, y: graph.y + 6 * s, w: graph.w - 8, h: graph.h - 12 * s }, live.rateHistory, live.rateHead, live.peak);
-    text(g, live.burst.inBurst ? 'BURST' : 'quiet', graph.x + graph.w - 6 * s, graph.y + 4 * s, fontPx(10, s), live.burst.inBurst ? '#fff' : '#666', 'right');
+    text(g, live.burst.inBurst ? 'BURST' : 'quiet', graph.x + graph.w - 6 * s, graph.y + 4 * s, fontPx(10, s), live.burst.inBurst ? '#fff' : '#777', 'right');
     const norm = live.rate / live.peak, m = paperMappings(norm);
     const cols = row({ x: st.x, y: graph.y + graph.h + 12 * s, w: st.w, h: fontPx(9, s) * 3 }, 4, 16 * s);
     const span = (r: [number, number], value: number) => (value - r[0]) / (r[1] - r[0]); // where in its published range
@@ -172,7 +173,7 @@ function sound(g: G, l: DetailLayout, v: DrawInput) {
         [`${SOUND_FACTS.descriptionSource}: population firing rate → synthesis density and spatialization; burst endpoints → harmonic transitions`, '#999'],
         [`${SOUND_FACTS.harmony} · distorted electric guitar · ${SOUND_FACTS.channels} ch · a reverb per channel${sl.harmony !== undefined ? ` · harmonic step ${sl.harmony} (LIVE)` : ''}`, '#999'],
         ['← robot sensors over serial  ·  → 27 solenoids', '#bbb'],
-        [live.rateSource === 'live' ? 'LIVE · rate from the patch' : SOUND_FACTS.badge, live.rateSource === 'live' ? '#fff' : '#555'],
+        [live.rateSource === 'live' ? 'LIVE · rate from the patch' : SOUND_FACTS.badge, live.rateSource === 'live' ? '#fff' : '#777'],
     ], textBox, s);
     chain(g, l.chain, [
         [indexLabel(v.index), 'OSC → audio computer'],
@@ -215,7 +216,7 @@ function led(g: G, l: DetailLayout, v: DrawInput) {
         ...(live.ledLines.length ? live.ledLines : ['—']).map(line => [line, '#ddd'] as [string, string]),
         ['', '#000'],
         [age, '#777'],
-        [`${LED_FACTS.idleMs / 1000} s without frames → white idle shimmer`, '#555'],
+        [`${LED_FACTS.idleMs / 1000} s without frames → white idle shimmer`, '#777'],
         ['two matrices in laser-cut frames; fibers carry the light into the glassware with the plants', '#777'],
     ], side, s);
     chain(g, l.chain, [
@@ -235,22 +236,21 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
     const side: Box = landscape
         ? { x: st.x + st.w * 0.6, y: st.y, w: st.w * 0.4, h: st.h }
         : { x: st.x, y: st.y + st.h * 0.58, w: st.w, h: st.h * 0.42 };
-    text(g, 'THE RULE · distance → angle, past a 10° deadband', side.x, side.y, px, '#ddd');
+    text(g, fit(g, 'THE RULE · distance → angle, past a 10° deadband', side.w, px), side.x, side.y, px, '#ddd');
     const chart: Box = { x: side.x, y: side.y + px * 1.8, w: side.w, h: Math.min(side.h * 0.42, side.w * 0.6) };
     armRuleChart(g, chart, live.arms, s);
     const below: Box = { x: side.x, y: chart.y + chart.h + px, w: side.w, h: side.y + side.h - (chart.y + chart.h + px) };
-    clippedLines(g, [
+    linesKeepLast(g, [
         ...live.arms.map((a, k): [string, string] => {
             // Each value says where it came from: the distance (and the target and phase it drives), and the servo.
             const from = a.live.proximity === a.live.servo ? (a.live.proximity ? 'LIVE' : 'sim') : a.live.proximity ? 'cm LIVE · servo sim' : 'cm sim · servo LIVE';
             return [`arm ${k + 1} · ${Math.round(a.cm)} cm → ${servoTarget(a.cm)}° · servo ${Math.round(a.servo)}° · ${a.motion.phase}${a.touch ? ' · touched' : ''} · ${from}`, armIsLive(a) ? '#fff' : '#999'];
         }),
-        [`${ROBOT_FACTS.sketch}: ramps at 200°/s, settles 100 ms, then ignores the sensor for 2 s; serial to Max`, '#888'],
-        [`${ROBOT_FACTS.rebuild}: the same rules, touch-lit fibres, OSC to Max (9100) and here (3333, arms 1–3)`, '#777'],
-        ['hung upside down: the tendon curls the spine, gravity swings it back', '#777'],
-        [`┄ ${ROBOT_FACTS.dormant}`, '#555'],
-        robotCaption(live.arms.some(armIsLive)),
-    ], below, s);
+        ['ramps at 200°/s, settles 100 ms, then ignores the sensor for 2 s', '#888'],
+        [`${ROBOT_FACTS.rebuild} (most likely this show's): touch-lit fibres; OSC to Max (9100) or serial sensordata:, and here (3333)`, '#777'],
+        [`${ROBOT_FACTS.sketch} (CURRENTS): the same rules; serial proximitydata:, which the Max patch doesn't route`, '#777'],
+        [`┄ ${ROBOT_FACTS.dormant}`, '#777'],
+    ], [robotCaption(live.arms.some(armIsLive))], below, s);
     chain(g, l.chain, [
         ['visitor', 'within 1 m'],
         ['ultrasonic', '0–100 cm · at the tip'],
@@ -261,19 +261,21 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
 }
 
 function robotSource(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, px = fontPx(9, s);
+    const s = v.scale, px = fontPx(9, s), kpx = fontPx(8, s), top = fontPx(10, s) * 2;
+    const attribution: [string, string][] = [[ATTRIBUTION, '#888']], attributionH = linesHeight(g, attribution, b.w, s, 10);
     text(g, 'VISITORS', b.x, b.y, fontPx(10, s), '#fff');
-    const bars = row({ x: b.x, y: b.y + fontPx(10, s) * 2, w: b.w, h: Math.min(b.h * 0.6, 180 * s) }, v.live.arms.length, 10 * s);
+    const room = b.h - top - px * 2.2 - kpx - px - attributionH; // under the bars: their labels, the key line, the attribution
+    const bars = row({ x: b.x, y: b.y + top, w: b.w, h: Math.max(8, Math.min(room, 180 * s)) }, v.live.arms.length, 10 * s);
     v.live.arms.forEach((a, k) => {
         const c = bars[k], fill = Math.max(0, Math.min(1, 1 - a.cm / ARM_RULES.rangeCm));
         frame(g, c, '#222');
         g.fillStyle = a.live.proximity ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)';
         g.fillRect(c.x + 2, c.y + c.h * (1 - fill), c.w - 4, c.h * fill);
-        if (fill === 0) text(g, 'nobody', c.x + c.w / 2, c.y + c.h - px * 1.4, fontPx(8, s), '#555', 'center');
+        if (fill === 0) text(g, 'nobody', c.x + c.w / 2, c.y + c.h - px * 1.4, fontPx(8, s), '#777', 'center');
         text(g, `${k + 1} · ${Math.round(a.cm)} cm`, c.x + c.w / 2, c.y + c.h + 4 * s, px, a.live.proximity ? '#fff' : '#888', 'center');
     });
-    text(g, 'closer = taller · 100 cm = nobody', b.x, bars[0].y + bars[0].h + px * 2.2, fontPx(8, s), '#555');
-    lines(g, [[ATTRIBUTION, '#5a5a5a']], { x: b.x, y: b.y + b.h - fontPx(10, s) * 3, w: b.w, h: fontPx(10, s) * 3 }, s, 10);
+    text(g, fit(g, 'closer = taller · 100 cm = nobody', b.w, kpx), b.x, bars[0].y + bars[0].h + px * 2.2, kpx, '#777');
+    lines(g, attribution, { x: b.x, y: b.y + b.h - attributionH, w: b.w, h: attributionH }, s, 10);
 }
 
 const VIEW_MS = 12_000; // the termite form alternates: turning, then its four print segments
@@ -331,7 +333,7 @@ function termitePanel(g: G, b: Box, v: DrawInput, s: number) {
     clippedLines(g, [
         [view, '#ccc'],
         [FAB_FACTS.pipeline, '#888'],
-        [`${FAB_FACTS.termite.source} · made before the show, not on /index`, '#555'],
+        [`${FAB_FACTS.termite.source} · made before the show, not on /index`, '#777'],
     ], { x: b.x, y: b.y + b.h - capH, w: b.w, h: capH }, s);
 }
 
@@ -352,9 +354,9 @@ function vesselPanel(g: G, b: Box, v: DrawInput, s: number) {
         [`layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈ · ${Math.round(vessel.heightMm)} mm tall, beside the termite form`, '#fff'],
         [`z ${z} mm${printed < vessel.layers.length ? ` · printed to layer ${printed}` : ''}`, '#bbb'],
         ["each neuron's firing locally speeds the contour's growth; sampled layers stack into one spiral", '#888'],
-        ['linear in the recording: the sketch adds a layer only while a neuron fires', '#666'],
+        ['linear in the recording: the sketch adds a layer only while a neuron fires', '#777'],
         [`${vessel.layers.length} × ${vessel.layerMm} mm spiral · nozzle ${vessel.header.nozzle ?? '?'}`, '#777'],
-        [VESSEL_FACTS.file, '#666'],
+        [VESSEL_FACTS.file, '#777'],
         [`${VESSEL_FACTS.clay} · ${VESSEL_FACTS.printer} (${VESSEL_FACTS.source})`, '#777'],
     ], info, s);
 }
@@ -362,7 +364,7 @@ function vesselPanel(g: G, b: Box, v: DrawInput, s: number) {
 function fab(g: G, l: DetailLayout, v: DrawInput) {
     const s = l.scale, st = storyTop(l), { termite, vessel } = v;
     if (!termite && !vessel) {
-        lines(g, [['no artifact data (data/termite_slices.bin, data/vessel.gcode)', '#999'], ['both artifacts are grown from this recording before the show; link their files into data/ to draw them', '#666']], { ...st, y: st.y + st.h * 0.3 }, s, 10);
+        lines(g, [['no artifact data (data/termite_slices.bin, data/vessel.gcode)', '#999'], ['both artifacts are grown from this recording before the show; link their files into data/ to draw them', '#777']], { ...st, y: st.y + st.h * 0.3 }, s, 10);
     } else {
         const p = fabPanels(st);
         termitePanel(g, p.form, v, s);

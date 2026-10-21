@@ -232,5 +232,5 @@ export function schematic(g: G, b: Box, ledShare: number, s: number): void {
     g.stroke();
     text(g, 'vessel', vx, floor + 2 * s, px, '#999', 'center');
     text(g, 'termite form', tx, floor + 2 * s, px, '#999', 'center');
-    lines(g, [['schematic: the two pieces at their real heights, the frame and fibres not to scale', '#666']], { x: b.x, y: b.y + b.h - px * 1.5, w: b.w, h: px * 1.5 }, s, 8);
+    lines(g, [['schematic: the two pieces at their real heights, the frame and fibres not to scale', '#777']], { x: b.x, y: b.y + b.h - px * 1.5, w: b.w, h: px * 1.5 }, s, 8);
 }
