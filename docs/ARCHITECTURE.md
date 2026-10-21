@@ -63,7 +63,12 @@ data/organoid_firing.f16, vessel.gcode ─┘          (src/show/routing/live.ts
 - `tour.ts`: 20 s stops, 60 s idle resume.
 - `telemetry.ts`: the `/routing/*` contract and freshness.
 - `swarm.ts`: stand-in agents seeded on the neuron positions.
-- `live.ts`: per-frame state from the playhead. The spike slice is capped at 30 ms like `showOutputAfter`; it holds glows, strikes, rate and the LED cells and serial lines, plus the arms.
+- `playhead.ts`: which clock to follow: the show's while it runs and the bridge is connected, else local playback.
+- `captions.ts`: state-dependent copy (the playhead line, where the firing comes from, the attribution under every detail source).
+- `live.ts`: per-frame state from the playhead.
+  - **Spikes:** a forward step up to 250 ms keeps all its spikes; a bigger or backwards jump keeps 30 ms.
+  - **Held playhead:** after 150 ms still, the playhead counts as stopped. The firing fades like EoC's 0.5 s and the `/index` dashes stop.
+  - **Also held:** glows, strikes, the rate and burst state (fresh telemetry wins), the LED pixels as `DualLED_Currents.ino` draws `F:`/`C:`, the serial lines, and the arms.
 
 **View:** `src/components/RoutingView.tsx` owns the canvas, the loop, the tour and the operator settings (`src/utils/routingSettings.ts`). The loop is paused when hidden or off-screen. Drawing lives in `src/components/routing/` (`glyphs.ts`, `overview.ts`, `details.ts`).
 

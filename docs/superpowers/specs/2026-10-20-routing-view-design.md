@@ -283,3 +283,19 @@ The presentation screen changes between shows, landscape or portrait, and presen
 2. Whether `single-object-436666.gcode` is the cut-off version, or the height the print stopped at (`vesselPrintedMm`).
 3. The termite mound files.
 4. The growth sketch's layer capture log, for an exact layer schedule.
+
+## Amendments (after the final review)
+
+- **Per-frame spikes:** a forward step of up to 250 ms keeps every spike in it. Only a bigger or backwards jump is cut to the last 30 ms. With 30 ms on every frame, local playback dropped 10–40 % of spikes, so the strikes no longer matched what the LEDs and sound got.
+- **Stopped and paused:** after 150 ms without the playhead moving, it counts as stopped. The Visual firing fades over EoC's 0.5 s and the `/index` dashes stop, because nothing is being sent.
+- **Bridge offline:** the view follows local playback even if the last show state said "running" (`playhead.ts`).
+- **LED cells** follow `DualLED_Currents.ino`, the sketch in use:
+  - `F:x,y` is a cyan pixel with a half-life cyan halo;
+  - `C:x,y` is a disc of radius 3: red centre, purple to distance 2, blue to 3;
+  - both sit over the white baseline, which is brighter after 0.5 s without frames.
+- **Telemetry:** fresh `burst`, `harmony`, `tones`, `grains`, `kick` and `touch` readings replace the computed or simulated values. Strikes carry a sequence number, so two at the same timestamp both show. Every `/routing/*` message, malformed or not, stays out of React state.
+- **Copy:**
+  - the attribution sits under every detail's source;
+  - the Fabrication spoke reads `before the show`;
+  - a blob for another dataset is named as such;
+  - the strike log numbers slots 0–26, as the contract does.
