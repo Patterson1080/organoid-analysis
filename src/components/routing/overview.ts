@@ -66,7 +66,10 @@ function cardHead(g: G, b: Box, key: MediumKey, hover: boolean, scale: number) {
     const { title, sub } = CARD_TITLES[key];
     text(g, title, b.x + pad, b.y + pad * 0.8, px, '#fff');
     const tw = g.measureText(title).width; // text() left the title's font set
-    text(g, sub, b.x + pad + tw + pad, b.y + pad * 0.8 + (px - fontPx(9, scale)) * 0.6, fontPx(9, scale), '#777');
+    const subX = b.x + pad + tw + pad, subPx = fontPx(9, scale);
+    g.font = `${subPx}px ${MONO}`;
+    const room = b.x + b.w - pad * 2 - fontPx(10, scale) - subX; // up to the ⤢ mark
+    text(g, fit(g, sub, room), subX, b.y + pad * 0.8 + (px - subPx) * 0.6, subPx, '#777');
     text(g, '⤢', b.x + b.w - pad, b.y + pad * 0.7, fontPx(10, scale), hover ? '#fff' : '#444', 'right');
 }
 
@@ -100,15 +103,24 @@ function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offli
 type Segment = { sx: number; sy: number; ax: number; ay: number };
 
 /** A protocol tag on a spoke, drawn after the cards: at the middle of the spoke, or slid toward
- *  (and just inside) the circle until it clears every card. */
-function spokeTag(g: G, s: Segment, label: string, cards: Box[], scale: number, color = '#888') {
+ *  (and just inside) the circle until it clears every card and every tag already placed, which
+ *  it joins. */
+function spokeTag(g: G, s: Segment, label: string, avoid: Box[], scale: number, color = '#888') {
     const px = fontPx(8, scale);
     g.font = `${px}px ${MONO}`;
     const w = g.measureText(label).width + px * 0.8, h = px * 1.5;
     const at = (t: number) => ({ x: s.sx + (s.ax - s.sx) * t, y: s.sy + (s.ay - s.sy) * t });
-    const clear = (p: { x: number; y: number }) => !cards.some(c => overlaps({ x: p.x - w / 2, y: p.y - h / 2, w, h }, c));
-    const spot = [0.5, 0.3, 0.1, -0.15, -0.35].map(at).find(clear) ?? at(-0.35);
-    tag(g, label, spot.x, spot.y, px, color);
+    const clear = (p: { x: number; y: number }) => !avoid.some(c => overlaps({ x: p.x - w / 2, y: p.y - h / 2, w, h }, c));
+    const spot = [0.5, 0.3, 0.1, -0.15, -0.35, -0.55].map(at).find(clear) ?? at(-0.35);
+    avoid.push(tag(g, label, spot.x, spot.y, px, color));
+}
+
+/** `s` cut to `maxW` with an ellipsis, in the current font. */
+function fit(g: G, s: string, maxW: number): string {
+    if (g.measureText(s).width <= maxW) return s;
+    let out = s;
+    while (out.length > 1 && g.measureText(`${out}…`).width > maxW) out = out.slice(0, -1);
+    return out.length > 1 ? `${out}…` : '';
 }
 
 function pulse(g: G, s: { sx: number; sy: number; ax: number; ay: number }, t: number, scale: number) {
@@ -274,7 +286,7 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
     }
 
     // Tags on top of everything: the protocols, and the two links inside the audio computer.
-    const boxes = Object.values(cards);
+    const boxes: Box[] = Object.values(cards); // tags join it as they're placed
     spokeTag(g, toVisual, `OSC :${VISUAL_FACTS.port}`, boxes, s);
     spokeTag(g, toSound, 'OSC', boxes, s);
     spokeTag(g, toLed, 'SERIAL', boxes, s);

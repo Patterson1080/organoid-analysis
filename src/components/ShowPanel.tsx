@@ -20,7 +20,7 @@ interface ShowPanelProps {
     connected: boolean;
     onStart: (config: ShowConfig) => void;
     onStop: () => void;
-    presentation?: boolean;   // read-only: no start/stop or config fields, taller raster
+    presentation?: boolean;   // read-only: no start/stop or config fields; the routing view takes the rest of the screen
     // The routing view below the timeline
     neurons: Neuron[];
     playbackTimeRef: React.MutableRefObject<number>;   // local playback, when no show runs
@@ -34,8 +34,7 @@ const RASTER_HALF_MS = 1000;   // raster shows ±1 s of data around the playhead
 const OVERVIEW_H = 64;
 const TICKS_H = 14;
 const CYCLE_H = 10;
-const RASTER_H = 160;
-const PRESENTATION_RASTER_SHARE = 0.3;   // of the viewport height, at least RASTER_H
+const RASTER_H = 160;   // in presentation too: the routing view below gets the rest of the screen
 const GAP = 8;
 const ALPHA_BUCKETS = 5;   // raster dots batched into Path2Ds by distance from the playhead
 
@@ -80,8 +79,7 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
-    const [fitRasterH, setFitRasterH] = useState(RASTER_H);
-    const rasterH = presentation ? fitRasterH : RASTER_H;
+    const rasterH = RASTER_H;
     const [form, setForm] = useState<FormValues | null>(null);
     const [stopArmed, setStopArmed] = useState(false);
     const running = !!showState?.running;
@@ -108,14 +106,6 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
-
-    useEffect(() => {
-        if (!presentation) return;
-        const fit = () => setFitRasterH(Math.max(RASTER_H, Math.round(window.innerHeight * PRESENTATION_RASTER_SHARE)));
-        fit();
-        window.addEventListener('resize', fit);
-        return () => window.removeEventListener('resize', fit);
-    }, [presentation]);
 
     // Whole-recording firing-rate strip, rendered once per dataset/range/width.
     const startIndex = config?.startIndex ?? 0;
