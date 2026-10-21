@@ -29,15 +29,23 @@ export function closeBox(l: DetailLayout): Box {
     return { x: l.header.x + l.header.w - w, y: l.header.y, w, h: l.header.h };
 }
 
-/** Boxes in a row joined by arrows: [title, live value] each. */
-function chain(g: G, b: Box, items: [string, string][], s: number) {
-    const gap = 14 * s, rows = items.map(([title, value]): [string, string][] => [[title, '#e6e6e6'], [value, '#888']]);
-    const cols = row(b, items.length, gap), textW = cols[0].w - 12 * s; // a narrow cell wraps: it grows to fit, up to the chain box
-    const h = Math.min(b.h, Math.max(46 * s, ...rows.map(r => linesHeight(g, r, textW, s) + 12 * s)));
+/** The tallest each medium's chain cells have grown in this layout, keyed by its chain box (a new size
+ *  brings a new box). */
+const chainRoom = new WeakMap<Box, Partial<Record<MediumKey, number>>>();
+
+/** Boxes in a row joined by arrows: [title, live value] each. A narrow cell wraps and the row grows to
+ *  fit, up to the chain box; it only grows within a layout, so a live value that rewraps doesn't resize
+ *  the row from frame to frame. */
+function chain(g: G, b: Box, key: MediumKey, items: [string, string][], s: number) {
+    const gap = 14 * s, pad = 6 * s, rows = items.map(([title, value]): [string, string][] => [[title, '#e6e6e6'], [value, '#888']]);
+    const cols = row(b, items.length, gap), textW = cols[0].w - 2 * pad, room = chainRoom.get(b) ?? {};
+    const h = Math.max(room[key] ?? 0, Math.min(b.h, Math.max(46 * s, ...rows.map(r => linesHeight(g, r, textW, s) + 2 * pad))));
+    room[key] = h;
+    chainRoom.set(b, room);
     const cells = cols.map(c => ({ ...c, y: b.y + (b.h - h) / 2, h }));
     cells.forEach((c, i) => {
         frame(g, c, '#333');
-        clippedLines(g, rows[i], { x: c.x + 6 * s, y: c.y + 6 * s, w: c.w - 12 * s, h: c.h - 12 * s }, s, 9, c);
+        clippedLines(g, rows[i], { x: c.x + pad, y: c.y + pad, w: c.w - 2 * pad, h: c.h - 2 * pad }, s, 9, c);
         if (i < cells.length - 1) {
             const y = c.y + c.h / 2, x0 = c.x + c.w + 2, x1 = c.x + c.w + gap - 2;
             g.strokeStyle = '#666';
@@ -109,7 +117,7 @@ function visual(g: G, l: DetailLayout, v: DrawInput) {
         [`out  ${VISUAL_OUTPUT_CHAINS[v.visualOutput].join(' → ')}`, '#bbb'],
         [VISUAL_FACTS.drawnNote, '#777'],
     ], below, s);
-    chain(g, l.chain, [
+    chain(g, l.chain, 'visual', [
         [indexLabel(v.index), v.fps === null ? 'OSC int · one a frame' : `OSC int · ${v.fps}/s`],
         ['OSCMapping', `UDP :${VISUAL_FACTS.port}`],
         ['NeuronFiringSource', `${VISUAL_FACTS.blob} row`],
@@ -139,7 +147,7 @@ function soundFromPatch(g: G, l: DetailLayout, v: DrawInput, patch: PatchData) {
     rules(g, p.rules, sv, s);
     harmony(g, p.harmony, sv, v.index, v.mode, v.fps, s);
     speakers(g, p.output, sv, v.now, s);
-    chain(g, l.chain, [
+    chain(g, l.chain, 'sound', [
         [indexLabel(v.index), 'OSC → audio computer'],
         ['peek~ activity · flags', `v ${sv.v.toFixed(3)} · flag ${sv.flagsSoFar}`],
         ['a = v / 0.9668', sv.a.toFixed(3)],
@@ -165,7 +173,7 @@ function sound(g: G, l: DetailLayout, v: DrawInput) {
     bar(g, cols[2], span(SOUND_FACTS.grainMs, m.grainMs), `grain ${m.grainMs.toFixed(0)} ms`, s);
     bar(g, cols[3], span(SOUND_FACTS.kick, kick.perSec), `kick ${kick.perSec.toFixed(2)}/s · ${SOUND_FACTS.kickPitch}${kick.live ? ' · LIVE' : ''}`, s);
     const textBox: Box = { x: st.x, y: cols[0].y + cols[0].h + 10 * s, w: st.w, h: st.y + st.h - (cols[0].y + cols[0].h + 10 * s) };
-    clippedLines(g, [
+    linesKeepLast(g, [
         [v.patch // linked, but nothing to read at this index (none heard yet, or past the data)
             ? `${live.sound.heardIndex === null ? 'no /index heard yet' : `no patch data at ${indexLabel(live.sound.heardIndex)}`}: ≈ from spikes until there is (${SOUND_FACTS.patchFile})`
             : `link activitylevel.wav + burstflags.wav (dev/audio) into data/ for the patch's own values (${SOUND_FACTS.patchFile})`, '#bbb'],
@@ -175,7 +183,7 @@ function sound(g: G, l: DetailLayout, v: DrawInput) {
         ['← robot sensors over serial  ·  → 27 solenoids', '#bbb'],
         [live.rateSource === 'live' ? 'LIVE · rate from the patch' : SOUND_FACTS.badge, live.rateSource === 'live' ? '#fff' : '#777'],
     ], textBox, s);
-    chain(g, l.chain, [
+    chain(g, l.chain, 'sound', [
         [indexLabel(v.index), 'OSC → audio computer'],
         ['Max/MSP', 'reads activity + flag WAVs'],
         ['population rate ≈', `${Math.round(live.rate)}/100 ms`],
@@ -196,7 +204,7 @@ function solenoids(g: G, l: DetailLayout, v: DrawInput) {
         strikeCaption(live.strikeSource, v.mode, live.strikes),
         ...log,
     ], logBox, s);
-    chain(g, l.chain, [
+    chain(g, l.chain, 'solenoids', [
         [indexLabel(v.index), 'OSC → audio computer'],
         [SOLENOID_FACTS.file, `line index + 1 · ${live.backboneSlots.length} of ${live.neurons.length}`],
         ['<27 digits>', `${SOLENOID_FACTS.baud} baud`],
@@ -219,7 +227,7 @@ function led(g: G, l: DetailLayout, v: DrawInput) {
         [`${LED_FACTS.idleMs / 1000} s without frames → white idle shimmer`, '#777'],
         ['two matrices in laser-cut frames; fibers carry the light into the glassware with the plants', '#777'],
     ], side, s);
-    chain(g, l.chain, [
+    chain(g, l.chain, 'led', [
         ['ledStep', `trail ${LED_FACTS.trail} · burst >${LED_FACTS.burstOver}`],
         ['SERIAL_SYNC', 'WebSocket :8081'],
         [`F: / C: ≤${LED_FACTS.perFrameCap}`, `${live.ledFrames} frames`],
@@ -236,7 +244,7 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
     const side: Box = landscape
         ? { x: st.x + st.w * 0.6, y: st.y, w: st.w * 0.4, h: st.h }
         : { x: st.x, y: st.y + st.h * 0.58, w: st.w, h: st.h * 0.42 };
-    text(g, 'THE RULE · distance → angle, past a 10° deadband', side.x, side.y, px, '#ddd', 'left', side.w);
+    text(g, `THE RULE · distance → angle, past a ${ARM_RULES.deadbandDeg}° deadband`, side.x, side.y, px, '#ddd', 'left', side.w);
     const chart: Box = { x: side.x, y: side.y + px * 1.8, w: side.w, h: Math.min(side.h * 0.42, side.w * 0.6) };
     armRuleChart(g, chart, live.arms, s);
     const below: Box = { x: side.x, y: chart.y + chart.h + px, w: side.w, h: side.y + side.h - (chart.y + chart.h + px) };
@@ -246,13 +254,13 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
             const from = a.live.proximity === a.live.servo ? (a.live.proximity ? 'LIVE' : 'sim') : a.live.proximity ? 'cm LIVE · servo sim' : 'cm sim · servo LIVE';
             return [`arm ${k + 1} · ${Math.round(a.cm)} cm → ${servoTarget(a.cm)}° · servo ${Math.round(a.servo)}° · ${a.motion.phase}${a.touch ? ' · touched' : ''} · ${from}`, armIsLive(a) ? '#fff' : '#999'];
         }),
-        ['ramps at 200°/s, settles 100 ms, then ignores the sensor for 2 s', '#888'],
-        [`${ROBOT_FACTS.rebuild} (most likely this show's): touch-lit fibres; OSC to Max (9100) or serial sensordata:, and here (3333)`, '#777'],
+        [`ramps at ${ARM_RULES.slewDps}°/s, settles ${ARM_RULES.settleMs} ms, then ignores the sensor for ${ARM_RULES.cooldownMs / 1000} s`, '#888'],
+        [`${ROBOT_FACTS.rebuild} (most likely this show's): OSC to Max (9100) or serial sensordata:, and here (3333); touch and fibre light off in this show`, '#777'],
         [`${ROBOT_FACTS.sketch} (CURRENTS): the same rules; serial proximitydata:, which the Max patch doesn't route`, '#777'],
         [`┄ ${ROBOT_FACTS.dormant}`, '#777'],
         robotCaption(live.arms.some(armIsLive)),
     ], below, s);
-    chain(g, l.chain, [
+    chain(g, l.chain, 'robot', [
         ['visitor', 'within 1 m'],
         ['ultrasonic', '0–100 cm · at the tip'],
         ['map → servo', '10° deadband · 2 s rest'],
@@ -275,7 +283,7 @@ function robotSource(g: G, b: Box, v: DrawInput) {
         if (fill === 0) text(g, 'nobody', c.x + c.w / 2, c.y + c.h - px * 1.4, kpx, '#777', 'center');
         text(g, `${k + 1} · ${Math.round(a.cm)} cm`, c.x + c.w / 2, c.y + c.h + 4 * s, px, a.live.proximity ? '#fff' : '#888', 'center');
     });
-    text(g, 'closer = taller · 100 cm = nobody', b.x, bars[0].y + bars[0].h + px * 2.2, kpx, '#777', 'left', b.w);
+    text(g, `closer = taller · ${ARM_RULES.rangeCm} cm = nobody`, b.x, bars[0].y + bars[0].h + px * 2.2, kpx, '#777', 'left', b.w);
     lines(g, attribution, { x: b.x, y: b.y + b.h - attributionH, w: b.w, h: attributionH }, s, 10);
 }
 
@@ -372,7 +380,7 @@ function fab(g: G, l: DetailLayout, v: DrawInput) {
         vesselPanel(g, p.vessel, v, s);
         schematic(g, p.schematic, ledShare(v.live.ledCells), s);
     }
-    chain(g, l.chain, [
+    chain(g, l.chain, 'fab', [
         ['organoid', '131 · 180 s'],
         ['termites · growth', 'same spikes'],
         [`${FAB_FACTS.termite.lattice} lattice`, 'contours'],

@@ -345,7 +345,7 @@ export function RoutingView(props: RoutingViewProps) {
                 <canvas
                     ref={canvasRef}
                     role="img"
-                    aria-label="Routing view: the organoid recording's /index and where it goes, to the visuals, sound, solenoids, LEDs, robot arms and the fabricated artifacts"
+                    aria-label="Routing view: the organoid recording's /index goes to the visuals, sound, solenoids and LEDs; visitors move the robot arms, which feed the sound; the artifacts were grown from this recording before the show"
                     style={{ display: 'block', touchAction: 'manipulation' }}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}

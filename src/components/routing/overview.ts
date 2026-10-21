@@ -6,10 +6,10 @@ import { formatClock } from '../../show/showMath';
 import { cableAngle, cablePoint } from '../../show/routing/cables';
 import type { Cable, Point } from '../../show/routing/cables';
 import { ATTRIBUTION_ROW, firingCaption, indexLabel, robotCaption, strikeCaption } from '../../show/routing/captions';
-import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
+import { CARD_TITLES, FAB_FACTS, LED_FACTS, SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../../show/routing/facts';
 import type { Box, RoutingLayout } from '../../show/routing/layout';
-import { fontPx, row } from '../../show/routing/layout';
+import { fontPx, inside, row } from '../../show/routing/layout';
 import { armIsLive, firingCount } from '../../show/routing/live';
 import type { LiveState } from '../../show/routing/live';
 import type { PatchData } from '../../show/routing/maxPatch';
@@ -47,11 +47,18 @@ export interface DrawInput {
     now: number;
 }
 
-const DASH_FLOW_MS = 18; // dash offset per ms on the /index cables, at scale 1
+const DASH_FLOW_MS = 18; // ms per px of dash travel on the /index cables, at scale 1
+const FLOW_DASH = [3, 11]; // a flowing /index cable's running dashes, at scale 1
+const FLOW_PERIOD = FLOW_DASH[0] + FLOW_DASH[1];
 const PULSE_MS = 550;
 
+/** The most each card's rows have needed in this layout, keyed by the layout's own card box (which
+ *  drawOverview passes unchanged; a new size brings new boxes). */
+const textRoom = new WeakMap<Box, number>();
+
 /** A card's header band and the body below it, split into a glyph area and a text area that holds
- *  `rows` as they wrap (up to 60 % of a stacked card; the glyph keeps the rest). */
+ *  `rows` as they wrap (up to 60 % of a stacked card; the glyph keeps the rest). The text area only
+ *  grows within a layout, so a live value that rewraps doesn't resize the glyph from frame to frame. */
 function cardParts(g: G, b: Box, scale: number, rows: [string, string][]): { glyph: Box; textBox: Box } {
     const pad = 8 * scale, head = fontPx(11, scale) + 9 * scale;
     const body: Box = { x: b.x + pad, y: b.y + head, w: b.w - 2 * pad, h: b.h - head - pad };
@@ -59,7 +66,8 @@ function cardParts(g: G, b: Box, scale: number, rows: [string, string][]): { gly
         const gw = body.w * 0.56;
         return { glyph: { x: body.x, y: body.y, w: gw, h: body.h }, textBox: { x: body.x + gw + pad, y: body.y, w: body.w - gw - pad, h: body.h } };
     }
-    const textH = Math.min(linesHeight(g, rows, body.w, scale), body.h * 0.6);
+    const textH = Math.max(textRoom.get(b) ?? 0, Math.min(linesHeight(g, rows, body.w, scale), body.h * 0.6));
+    textRoom.set(b, textH);
     const gh = Math.max(0, body.h - textH - pad / 2);
     return { glyph: { x: body.x, y: body.y, w: body.w, h: gh }, textBox: { x: body.x, y: body.y + gh + pad / 2, w: body.w, h: textH } };
 }
@@ -121,8 +129,8 @@ function drawCable(g: G, c: Cable, l: Lead, s: number) {
     if (l.flow !== undefined) {
         g.strokeStyle = '#fff';
         g.lineWidth = 2 * s;
-        g.setLineDash([3 * s, 11 * s]);
-        g.lineDashOffset = l.flow * s;
+        g.setLineDash(FLOW_DASH.map(d => d * s));
+        g.lineDashOffset = (l.flow % FLOW_PERIOD) * s; // within one period: canvases keep the offset as a float32, which the raw clock outgrows in days
         trace(g, c);
         g.stroke();
     }
@@ -131,18 +139,19 @@ function drawCable(g: G, c: Cable, l: Lead, s: number) {
 }
 
 /** A protocol tag beside a cable, drawn after the cards so the cable stays in view: off its middle,
- *  or further along it on either side, else just inside the rim where it leaves; clear of every card
- *  and every tag already placed, which it joins. */
-function cableTag(g: G, c: Cable, label: string, avoid: Box[], scale: number, color = '#888') {
-    const px = fontPx(8, scale), size = tagSize(g, label, px), { w, h } = size;
-    // The cable's own points count as obstacles (empty boxes), so the tag never sits on it.
-    const obstacles = [...avoid, ...Array.from({ length: 25 }, (_, i): Box => {
-        const [x, y] = cablePoint(c, i / 24);
-        return { x, y, w: 0, h: 0 };
-    })];
+ *  or further along it on either side, outside the organoid where it can be, else just inside the rim
+ *  where it leaves; on the canvas, off every cable (`onCables`, points along them all), and clear of
+ *  every box in `avoid` (the cards, the organoid's title, the tags already placed), which it joins. */
+function cableTag(g: G, l: RoutingLayout, c: Cable, label: string, avoid: Box[], onCables: Point[], scale: number, color = '#888') {
+    const { cx, cy, r } = l.centre, px = fontPx(8, scale), size = tagSize(g, label, px), { w, h } = size;
     const clear = ([x, y]: Point) => {
         const b = tagBox(x, y, size);
-        return !obstacles.some(o => overlaps(b, o));
+        return b.x >= 0 && b.y >= 0 && b.x + b.w <= 2 * cx && b.y + b.h <= 2 * cy // on the canvas, centred on the organoid
+            && !avoid.some(o => overlaps(b, o)) && !onCables.some(p => inside(b, p[0], p[1]));
+    };
+    const outside = ([x, y]: Point) => { // the box's nearest point to the centre lies beyond the rim
+        const b = tagBox(x, y, size);
+        return Math.hypot(Math.min(Math.max(cx, b.x), b.x + b.w) - cx, Math.min(Math.max(cy, b.y), b.y + b.h) - cy) > r;
     };
     // The tag's centre, just far enough off `at` in direction `a` that the box clears the point.
     const off = (at: Point, a: number): Point => {
@@ -150,7 +159,8 @@ function cableTag(g: G, c: Cable, label: string, avoid: Box[], scale: number, co
         return [at[0] + Math.cos(a) * d, at[1] + Math.sin(a) * d];
     };
     const beside = [0.5, 0.35, 0.65, 0.25, 0.75].flatMap(t => [Math.PI / 2, -Math.PI / 2].map(turn => off(cablePoint(c, t), cableAngle(c, t) + turn)));
-    const spot = [...beside, off(c.p0, cableAngle(c, 0) + Math.PI)].find(clear) ?? cablePoint(c, 0.5);
+    const rim = off(c.p0, cableAngle(c, 0) + Math.PI);
+    const spot = beside.find(p => clear(p) && outside(p)) ?? [...beside, rim].find(clear) ?? rim;
     avoid.push(tag(g, label, spot[0], spot[1], px, color));
 }
 
@@ -162,14 +172,22 @@ function pulse(g: G, c: Cable, t: number, s: number) {
     disc(g, x, y, 2.4 * s, `rgba(255,255,255,${1 - t * 0.6})`);
 }
 
+/** The organoid's title, and the box it covers (the tags keep clear of it). */
+function centreTitle(g: G, l: RoutingLayout, v: DrawInput): { label: string; px: number; box: Box } {
+    const { cx, cy, r } = l.centre, px = fontPx(9, v.scale), label = `ORGANOID · ${v.live.neurons.length || '—'} NEURONS`;
+    g.font = `${px}px ${MONO}`;
+    const w = g.measureText(label).width;
+    return { label, px, box: { x: cx - w / 2, y: cy - r * 0.84, w, h: px } };
+}
+
 function drawCentre(g: G, l: RoutingLayout, v: DrawInput) {
-    const { cx, cy, r } = l.centre, s = v.scale, live = v.live;
+    const { cx, cy, r } = l.centre, s = v.scale, live = v.live, title = centreTitle(g, l, v);
     g.strokeStyle = '#333';
     g.lineWidth = 1;
     g.beginPath();
     g.arc(cx, cy, r, 0, Math.PI * 2);
     g.stroke();
-    text(g, `ORGANOID · ${live.neurons.length || '—'} NEURONS`, cx, cy - r * 0.84, fontPx(9, s), '#888', 'center');
+    text(g, title.label, cx, title.box.y, title.px, '#888', 'center');
     const map: Box = { x: cx - r * 0.5, y: cy - r * 0.62, w: r, h: r };
     if (live.neurons.length) neuronMap(g, map, live.neurons, live.spikeGlow, s);
     else text(g, 'load data/ or upload CSVs', cx, cy - fontPx(9, s), fontPx(9, s), '#777', 'center');
@@ -187,16 +205,11 @@ function drawCentre(g: G, l: RoutingLayout, v: DrawInput) {
     y += fontPx(8, s) * 1.5;
     // The attribution shows whole and clear of the outline: on two lines when the circle is narrower
     // than it at that height, each on a black ground where it still crosses.
-    const apx = fontPx(8, s), cut = ATTRIBUTION.lastIndexOf(' · ');
+    const apx = fontPx(8, s), [attribution, color] = ATTRIBUTION_ROW, cut = attribution.lastIndexOf(' · ');
     const room = 2 * Math.sqrt(Math.max(0, r * r - (y + apx - cy) ** 2)) - 16 * s; // the circle's width at the line's foot
     g.font = `${apx}px ${MONO}`;
-    const parts = g.measureText(ATTRIBUTION).width <= room || cut < 0 ? [ATTRIBUTION] : [ATTRIBUTION.slice(0, cut), ATTRIBUTION.slice(cut + 3)];
-    parts.forEach((part, i) => {
-        const py = y + i * apx * LINE_H, w = g.measureText(part).width + 6 * s;
-        g.fillStyle = '#000';
-        g.fillRect(cx - w / 2, py - 1, w, apx + 2);
-        text(g, part, cx, py, apx, ATTRIBUTION_ROW[1], 'center');
-    });
+    const parts = g.measureText(attribution).width <= room || cut < 0 ? [attribution] : [attribution.slice(0, cut), attribution.slice(cut + 3)];
+    parts.forEach((part, i) => tag(g, part, cx, y + (i * LINE_H + 0.5) * apx, apx, color)); // tag() centres it, so the text's top sits on its line
 }
 
 function drawVisual(g: G, b: Box, v: DrawInput) {
@@ -227,15 +240,15 @@ function drawLed(g: G, b: Box, v: DrawInput) {
 }
 
 function drawFab(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, { termite, vessel } = v, px = fontPx(8, s);
-    const rows: [string, string][] = [
+    const s = v.scale, { termite, vessel } = v, px = fontPx(8, s), empty = !termite && !vessel;
+    const rows: [string, string][] = empty ? [['no artifact data (data/)', '#777'], ['same recording → growth → print', '#777']] : [
         [termite ? `termite form · PLA · ${termite.segments.length} printed segments` : 'termite form · link termite_slices.bin', '#bbb'],
         [vessel ? `clay vessel beside it · layer ${v.vesselLayer + 1} / ${vessel.layers.length} ≈` : 'vessel · link vessel.gcode', '#888'],
         ['side by side, to scale · made before the show', '#777'],
     ];
     const { glyph, textBox } = cardParts(g, b, s, rows);
-    if (!termite && !vessel) {
-        lines(g, [['no artifact data (data/)', '#777'], ['same recording → growth → print', '#777']], { ...glyph, y: glyph.y + glyph.h / 3 }, s);
+    if (empty) {
+        lines(g, rows, { ...glyph, y: glyph.y + glyph.h / 3 }, s);
         return;
     }
     // The two pieces as installed: side by side at one scale, turning; the vessel grown to the playhead.
@@ -315,6 +328,9 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
     frame(g, audioFrame, '#1c1c1c');
     text(g, 'AUDIO COMPUTER · Max/MSP', stacked ? audioFrame.x + 8 * s : audioFrame.x + audioFrame.w - 8 * s, audioFrame.y + 3 * s, fontPx(9, s), '#888', stacked ? 'left' : 'right');
 
+    // The organoid before its cables, so their jacks sit on its outline and its attribution's ground hides none of them.
+    drawCentre(g, l, v);
+
     // Cables out of the organoid; their tags go on after the cards.
     const flow = live.moving && v.phase !== 'off' ? -v.now / DASH_FLOW_MS : undefined;
     const routes: [keyof RoutingLayout['cables'], CableKind, string][] = [
@@ -340,14 +356,12 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
         : [[rb.x + rb.w * 0.5, rb.y + rb.h], [rb.x + rb.w * 0.5, audioFrame.y + audioFrame.h + margin], [so.x + so.w * 0.5, audioFrame.y + audioFrame.h + margin], [so.x + so.w * 0.5, so.y + so.h]];
     g.strokeStyle = '#bdbdbd';
     g.setLineDash([4 * s, 4 * s]);
-    g.lineDashOffset = -v.now / 30; // flowing from the robot into Max, as the arrow points
+    g.lineDashOffset = (-v.now / 30) % (8 * s); // flowing from the robot into Max, as the arrow points; within one period, as in drawCable
     g.beginPath();
     loop.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
     g.stroke();
     g.setLineDash([]);
     g.lineDashOffset = 0;
-
-    drawCentre(g, l, v);
 
     const draws: Record<MediumKey, (g: G, b: Box, v: DrawInput) => void> = {
         visual: drawVisual, led: drawLed, fab: drawFab, sound: drawSound, solenoids: drawSolenoids, robot: drawRobot,
@@ -364,9 +378,10 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
     }
 
     // Tags on top of everything: the protocols, and the two links inside the audio computer.
-    const boxes: Box[] = Object.values(cards); // tags join it as they're placed
-    for (const [key, kind, label] of routes) cableTag(g, l.cables[key], label, boxes, s, kind === 'offline' ? '#777' : '#888');
-    cableTag(g, l.strikes, 'strikes', boxes, s);
+    const boxes: Box[] = [...Object.values(cards), centreTitle(g, l, v).box]; // tags join it as they're placed
+    const onCables = [...Object.values(l.cables), l.strikes].flatMap(c => Array.from({ length: 49 }, (_, i) => cablePoint(c, i / 48)));
+    for (const [key, kind, label] of routes) cableTag(g, l, l.cables[key], label, boxes, onCables, s, kind === 'offline' ? '#777' : '#888');
+    cableTag(g, l, l.strikes, 'strikes', boxes, onCables, s);
     const px = fontPx(8, s);
     const [end, corner] = [loop[3], loop[2]];
     arrowHead(g, end[0] + (stacked ? 1 : 0), end[1] + (stacked ? 0 : 1), stacked ? Math.PI : -Math.PI / 2, 6 * s, '#bdbdbd');
