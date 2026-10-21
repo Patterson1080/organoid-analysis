@@ -2,8 +2,8 @@
 // and a rail of all six media to step between them.
 
 import { ARM_RULES, servoTarget } from '../../show/routing/arms';
-import { firingCaption, indexLabel, pad6, passCaption, robotCaption, sourceCaption, strikeCaption } from '../../show/routing/captions';
-import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, MEDIA, ROBOT_FACTS, SOLENOID_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
+import { ATTRIBUTION_ROW, firingCaption, indexLabel, pad6, passCaption, robotCaption, sourceCaption, strikeCaption } from '../../show/routing/captions';
+import { CARD_TITLES, FAB_FACTS, LED_FACTS, MEDIA, ROBOT_FACTS, SOLENOID_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
 import type { MediumKey } from '../../show/routing/facts';
 import type { Box, DetailLayout } from '../../show/routing/layout';
 import { fontPx, isLandscape, row } from '../../show/routing/layout';
@@ -14,7 +14,7 @@ import { paperMappings } from '../../show/routing/soundFeatures';
 import { soundCaptions, soundPanels } from '../../show/routing/soundLayout';
 import { SWARM_KEYS } from '../../show/routing/swarm';
 import { printedLayers } from '../../show/routing/vessel';
-import { LINE_H, MONO, arrowHead, clipTo, clippedLines, fit, fitSquare, frame, ledGrid, lines, linesHeight, linesKeepLast, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
+import { LINE_H, MONO, arrowHead, clipTo, clippedLines, fitSquare, frame, ledGrid, lines, linesHeight, linesKeepLast, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
 import type { G } from './glyphs';
 import { armRuleChart, armsPanel } from './armGlyphs';
 import type { DrawInput } from './overview';
@@ -32,9 +32,9 @@ export function closeBox(l: DetailLayout): Box {
 /** Boxes in a row joined by arrows: [title, live value] each. */
 function chain(g: G, b: Box, items: [string, string][], s: number) {
     const gap = 14 * s, rows = items.map(([title, value]): [string, string][] => [[title, '#e6e6e6'], [value, '#888']]);
-    const textW = (b.w - gap * (items.length - 1)) / items.length - 12 * s; // a narrow cell wraps: it grows to fit, up to the chain box
+    const cols = row(b, items.length, gap), textW = cols[0].w - 12 * s; // a narrow cell wraps: it grows to fit, up to the chain box
     const h = Math.min(b.h, Math.max(46 * s, ...rows.map(r => linesHeight(g, r, textW, s) + 12 * s)));
-    const cells = row({ x: b.x, y: b.y + (b.h - h) / 2, w: b.w, h }, items.length, gap);
+    const cells = cols.map(c => ({ ...c, y: b.y + (b.h - h) / 2, h }));
     cells.forEach((c, i) => {
         frame(g, c, '#333');
         clippedLines(g, rows[i], { x: c.x + 6 * s, y: c.y + 6 * s, w: c.w - 12 * s, h: c.h - 12 * s }, s, 9, c);
@@ -53,7 +53,7 @@ function chain(g: G, b: Box, items: [string, string][], s: number) {
 
 function header(g: G, l: DetailLayout, key: MediumKey) {
     const s = l.scale, { title, sub } = CARD_TITLES[key], c = closeBox(l), px = fontPx(13, s);
-    text(g, fit(g, `${title} · ${sub}`, c.x - l.header.x - 12 * s, px), l.header.x, l.header.y + 4 * s, px, '#fff');
+    text(g, `${title} · ${sub}`, l.header.x, l.header.y + 4 * s, px, '#fff', 'left', c.x - l.header.x - 12 * s);
     text(g, CLOSE_LABEL, c.x + c.w, c.y + 4 * s, fontPx(11, s), '#bbb', 'right');
 }
 
@@ -131,7 +131,7 @@ function bar(g: G, b: Box, t: number, label: string, s: number) {
 /** The patch at the playhead: the voices as they play, the rules that pace them, the chord, the speakers. */
 function soundFromPatch(g: G, l: DetailLayout, v: DrawInput, patch: PatchData) {
     const s = l.scale, sv = v.live.sound, p = soundPanels(storyTop(l)), px = fontPx(9, s);
-    text(g, fit(g, `VOICES · ${soundCaptions(v.live.moving).voices}`, p.score.w, px), p.score.x, p.score.y, px, '#ddd');
+    text(g, `VOICES · ${soundCaptions(v.live.moving).voices}`, p.score.x, p.score.y, px, '#ddd', 'left', p.score.w);
     const strip: Box = { x: p.score.x, y: p.score.y + px * 1.6, w: p.score.w, h: Math.max(8, p.score.h * 0.14) };
     activityStrip(g, strip, patch, v.range, sv.heardIndex, s);
     const below = strip.y + strip.h + 6 * s;
@@ -236,7 +236,7 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
     const side: Box = landscape
         ? { x: st.x + st.w * 0.6, y: st.y, w: st.w * 0.4, h: st.h }
         : { x: st.x, y: st.y + st.h * 0.58, w: st.w, h: st.h * 0.42 };
-    text(g, fit(g, 'THE RULE · distance → angle, past a 10° deadband', side.w, px), side.x, side.y, px, '#ddd');
+    text(g, 'THE RULE · distance → angle, past a 10° deadband', side.x, side.y, px, '#ddd', 'left', side.w);
     const chart: Box = { x: side.x, y: side.y + px * 1.8, w: side.w, h: Math.min(side.h * 0.42, side.w * 0.6) };
     armRuleChart(g, chart, live.arms, s);
     const below: Box = { x: side.x, y: chart.y + chart.h + px, w: side.w, h: side.y + side.h - (chart.y + chart.h + px) };
@@ -250,7 +250,8 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
         [`${ROBOT_FACTS.rebuild} (most likely this show's): touch-lit fibres; OSC to Max (9100) or serial sensordata:, and here (3333)`, '#777'],
         [`${ROBOT_FACTS.sketch} (CURRENTS): the same rules; serial proximitydata:, which the Max patch doesn't route`, '#777'],
         [`┄ ${ROBOT_FACTS.dormant}`, '#777'],
-    ], [robotCaption(live.arms.some(armIsLive))], below, s);
+        robotCaption(live.arms.some(armIsLive)),
+    ], below, s);
     chain(g, l.chain, [
         ['visitor', 'within 1 m'],
         ['ultrasonic', '0–100 cm · at the tip'],
@@ -261,9 +262,9 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
 }
 
 function robotSource(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, px = fontPx(9, s), kpx = fontPx(8, s), top = fontPx(10, s) * 2;
-    const attribution: [string, string][] = [[ATTRIBUTION, '#888']], attributionH = linesHeight(g, attribution, b.w, s, 10);
-    text(g, 'VISITORS', b.x, b.y, fontPx(10, s), '#fff');
+    const s = v.scale, px = fontPx(9, s), kpx = fontPx(8, s), hpx = fontPx(10, s), top = hpx * 2;
+    const attribution = [ATTRIBUTION_ROW], attributionH = linesHeight(g, attribution, b.w, s, 10);
+    text(g, 'VISITORS', b.x, b.y, hpx, '#fff');
     const room = b.h - top - px * 2.2 - kpx - px - attributionH; // under the bars: their labels, the key line, the attribution
     const bars = row({ x: b.x, y: b.y + top, w: b.w, h: Math.max(8, Math.min(room, 180 * s)) }, v.live.arms.length, 10 * s);
     v.live.arms.forEach((a, k) => {
@@ -271,10 +272,10 @@ function robotSource(g: G, b: Box, v: DrawInput) {
         frame(g, c, '#222');
         g.fillStyle = a.live.proximity ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)';
         g.fillRect(c.x + 2, c.y + c.h * (1 - fill), c.w - 4, c.h * fill);
-        if (fill === 0) text(g, 'nobody', c.x + c.w / 2, c.y + c.h - px * 1.4, fontPx(8, s), '#777', 'center');
+        if (fill === 0) text(g, 'nobody', c.x + c.w / 2, c.y + c.h - px * 1.4, kpx, '#777', 'center');
         text(g, `${k + 1} · ${Math.round(a.cm)} cm`, c.x + c.w / 2, c.y + c.h + 4 * s, px, a.live.proximity ? '#fff' : '#888', 'center');
     });
-    text(g, fit(g, 'closer = taller · 100 cm = nobody', b.w, kpx), b.x, bars[0].y + bars[0].h + px * 2.2, kpx, '#777');
+    text(g, 'closer = taller · 100 cm = nobody', b.x, bars[0].y + bars[0].h + px * 2.2, kpx, '#777', 'left', b.w);
     lines(g, attribution, { x: b.x, y: b.y + b.h - attributionH, w: b.w, h: attributionH }, s, 10);
 }
 

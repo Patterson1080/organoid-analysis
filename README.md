@@ -280,7 +280,7 @@ EoC needs the `/sim_off` · `/sim_on` handlers from its `show-sim-off` branch.
 
 The SHOW panel also shows where the show's signal goes and how each medium maps it, live, under the timeline. It's meant for visitors and for talks. Each card states its route and how sure it is: exact, **≈ computed** from the spikes, **SIMULATED**, or **LIVE** from the audio computer.
 
-The organoid sits in the centre, lit by its spikes on the playhead (the show's `/index`, or local playback), with the attribution line under it. The bridge feeds three media directly:
+The organoid sits in the centre, lit by its spikes on the playhead (the show's `/index`, or local playback), with the attribution line under it. Curved cables run from its rim, through a channel around it, into each card it feeds. On the `/index` streams, dashes flow while the index advances. The serial link to the LEDs pulses once a frame. The link to the artifacts is dotted, because they were made before the show. Max's short lead to the solenoids lights up with the strikes. Hovering a card lights its cable. The bridge feeds three media directly:
 
 | Card | Signal → medium | Source |
 |---|---|---|

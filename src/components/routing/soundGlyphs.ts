@@ -12,7 +12,7 @@ import { NOTE_NAMES, PATCH, chordAt, grainSpeed, grainTickMs, kickMs, toneMs } f
 import type { PatchData } from '../../show/routing/maxPatch';
 import { droneLevel, eventsSince } from '../../show/routing/soundEvents';
 import { activityEnvelope, soundCaptions } from '../../show/routing/soundLayout';
-import { LINE_H, clippedLines, fit, frame, text } from './glyphs';
+import { LINE_H, clippedLines, frame, text } from './glyphs';
 import type { G } from './glyphs';
 
 const SCORE_WINDOW_MS = 10_000;
@@ -249,7 +249,7 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
     }
     if (sv.playing) for (const v of sv.sim.drones) if (v.position > 0) glow[v.position] = Math.max(glow[v.position], droneLevel(v, now) * 0.35);
 
-    text(g, fit(g, 'OUTPUT · 16 positions → speakers 3–6', b.w, fontPx(9, s)), b.x, b.y, fontPx(9, s), '#ddd');
+    text(g, 'OUTPUT · 16 positions → speakers 3–6', b.x, b.y, fontPx(9, s), '#ddd', 'left', b.w);
     const top = b.y + px * 2.2, rowH = Math.min((b.h - px * 6) / 3, 34 * s), spk = Math.min(rowH, 22 * s);
     const pairs: [string, string, number, number | null][] = [['3', '4', 1, 17], ['5', '6', 9, null]]; // out18 never gets a kick
     pairs.forEach(([l, r, first, kickPos], k) => {

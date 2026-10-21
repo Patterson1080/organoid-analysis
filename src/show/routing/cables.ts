@@ -21,6 +21,9 @@ const HANDLE = 0.5; // handle length, as a share of the start-to-end distance
 const RIM_GAP = 3; // the cable starts just outside the organoid's outline
 const SPREAD = 0.6; // how far round the rim a cable starts, toward the open space beside the cards
 
+/** `p` moved `k` along direction `d`. */
+const along = (p: Point, d: Point, k: number): Point => [p[0] + d[0] * k, p[1] + d[1] * k];
+
 /** A point `along` (0..1) the edge, and the edge's outward normal. */
 function onEdge(b: Box, edge: Edge, along: number): { at: Point; n: Point } {
     switch (edge) {
@@ -40,18 +43,17 @@ export function organoidCable(c: { cx: number; cy: number; r: number }, card: Bo
     const direct = Math.atan2(at[1] - c.cy, at[0] - c.cx);
     const across = edge === 'left' || edge === 'right';
     const off = across ? Math.sin(direct) : Math.cos(direct); // 0 for a card square across from the centre
-    const toward = across ? Math.sign(off) * (Math.PI / 2) : off >= 0 ? 0 : Math.sign(direct || 1) * Math.PI;
+    const toward = across ? Math.sign(off) * (Math.PI / 2) : off >= 0 ? 0 : Math.sign(direct) * Math.PI;
     const a = direct + (toward - direct) * SPREAD * Math.abs(off), u: Point = [Math.cos(a), Math.sin(a)];
-    const p0: Point = [c.cx + u[0] * (c.r + RIM_GAP), c.cy + u[1] * (c.r + RIM_GAP)];
-    const h = HANDLE * Math.hypot(at[0] - p0[0], at[1] - p0[1]);
-    return { p0, p1: [p0[0] + u[0] * h, p0[1] + u[1] * h], p2: [at[0] + n[0] * h, at[1] + n[1] * h], p3: at };
+    const p0 = along([c.cx, c.cy], u, c.r + RIM_GAP), h = HANDLE * Math.hypot(at[0] - p0[0], at[1] - p0[1]);
+    return { p0, p1: along(p0, u, h), p2: along(at, n, h), p3: at };
 }
 
 /** A short cable between neighbouring cards, from the far part of `from`'s edge to the near part of
  *  `to`'s, bowing out by three quarters of `bulge` on that side. */
 export function patchArc(from: Box, to: Box, edge: Edge, bulge: number): Cable {
     const a = onEdge(from, edge, 0.8), b = onEdge(to, edge, 0.2);
-    return { p0: a.at, p1: [a.at[0] + a.n[0] * bulge, a.at[1] + a.n[1] * bulge], p2: [b.at[0] + b.n[0] * bulge, b.at[1] + b.n[1] * bulge], p3: b.at };
+    return { p0: a.at, p1: along(a.at, a.n, bulge), p2: along(b.at, b.n, bulge), p3: b.at };
 }
 
 export function cablePoint(c: Cable, t: number): Point {

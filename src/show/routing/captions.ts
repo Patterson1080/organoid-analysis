@@ -7,6 +7,9 @@ import { ATTRIBUTION, ROBOT_FACTS, VISUAL_FACTS } from './facts.ts';
 
 export const pad6 = (v: number) => String(Math.floor(v)).padStart(6, '0');
 
+/** The attribution every routing screen carries, as a row. */
+export const ATTRIBUTION_ROW: [string, string] = [ATTRIBUTION, '#888'];
+
 export const indexLabel = (index: number | null) => `/index ${index === null ? '——————' : pad6(index)}`;
 
 /** The lines under a detail's source: the playhead, what this medium hears, the attribution. */
@@ -14,7 +17,7 @@ export function sourceCaption(phase: 'on' | 'off' | 'stopped', index: number | n
     return [
         [phase === 'off' ? '■ OFF' : indexLabel(index), '#fff'],
         [heard, '#777'],
-        [ATTRIBUTION, '#888'],
+        ATTRIBUTION_ROW,
     ];
 }
 

@@ -5,7 +5,7 @@ import type { ShowConfig } from '../../types';
 import { formatClock } from '../../show/showMath';
 import { cableAngle, cablePoint } from '../../show/routing/cables';
 import type { Cable, Point } from '../../show/routing/cables';
-import { firingCaption, indexLabel, robotCaption, strikeCaption } from '../../show/routing/captions';
+import { ATTRIBUTION_ROW, firingCaption, indexLabel, robotCaption, strikeCaption } from '../../show/routing/captions';
 import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../../show/routing/facts';
 import type { Box, RoutingLayout } from '../../show/routing/layout';
@@ -18,7 +18,7 @@ import { SWARM_KEYS } from '../../show/routing/swarm';
 import type { SwarmKey } from '../../show/routing/swarm';
 import type { TermiteSlices } from '../../show/routing/termiteSlices';
 import type { Vessel } from '../../show/routing/vessel';
-import { LINE_H, MONO, arrowHead, clipTo, fit, frame, ledGrid, lines, linesHeight, linesKeepLast, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, tagSize, text } from './glyphs';
+import { LINE_H, MONO, arrowHead, clipTo, disc, frame, ledGrid, lines, linesHeight, linesKeepLast, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, tagBox, tagSize, text } from './glyphs';
 import type { G } from './glyphs';
 import { armPhaseText, armsPanel } from './armGlyphs';
 import { activityStrip, chordName, chordStrip, rateText } from './soundGlyphs';
@@ -72,7 +72,7 @@ function cardHead(g: G, b: Box, key: MediumKey, hover: boolean, scale: number) {
     const tw = g.measureText(title).width; // text() left the title's font set
     const subX = b.x + pad + tw + pad, subPx = fontPx(9, scale);
     const room = b.x + b.w - pad * 2 - fontPx(10, scale) - subX; // up to the ⤢ mark
-    text(g, fit(g, sub, room, subPx), subX, b.y + pad * 0.8 + (px - subPx) * 0.6, subPx, '#777');
+    text(g, sub, subX, b.y + pad * 0.8 + (px - subPx) * 0.6, subPx, '#777', 'left', room);
     text(g, '⤢', b.x + b.w - pad, b.y + pad * 0.7, fontPx(10, scale), hover ? '#fff' : '#666', 'right');
 }
 
@@ -130,31 +130,26 @@ function drawCable(g: G, c: Cable, l: Lead, s: number) {
     arrowHead(g, c.p3[0], c.p3[1], cableAngle(c, 1), 6 * s, l.color);
 }
 
-/** Where a cable leaves the organoid: a jack on the rim. */
-function jack(g: G, c: Cable, color: string, s: number) {
-    g.fillStyle = color;
-    g.beginPath();
-    g.arc(c.p0[0], c.p0[1], 2.4 * s, 0, Math.PI * 2);
-    g.fill();
-}
-
 /** A protocol tag beside a cable, drawn after the cards so the cable stays in view: off its middle,
  *  or further along it on either side, else just inside the rim where it leaves; clear of every card
  *  and every tag already placed, which it joins. */
 function cableTag(g: G, c: Cable, label: string, avoid: Box[], scale: number, color = '#888') {
-    const px = fontPx(8, scale), { w, h } = tagSize(g, label, px);
-    const box = ([x, y]: Point): Box => ({ x: x - w / 2, y: y - h / 2, w, h });
-    const path = Array.from({ length: 25 }, (_, i) => cablePoint(c, i / 24));
-    const clear = (p: Point) => {
-        const b = box(p);
-        return !avoid.some(o => overlaps(b, o)) && !path.some(([x, y]) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h);
+    const px = fontPx(8, scale), size = tagSize(g, label, px), { w, h } = size;
+    // The cable's own points count as obstacles (empty boxes), so the tag never sits on it.
+    const obstacles = [...avoid, ...Array.from({ length: 25 }, (_, i): Box => {
+        const [x, y] = cablePoint(c, i / 24);
+        return { x, y, w: 0, h: 0 };
+    })];
+    const clear = ([x, y]: Point) => {
+        const b = tagBox(x, y, size);
+        return !obstacles.some(o => overlaps(b, o));
     };
     // The tag's centre, just far enough off `at` in direction `a` that the box clears the point.
     const off = (at: Point, a: number): Point => {
         const d = (Math.abs(Math.cos(a)) * w + Math.abs(Math.sin(a)) * h) / 2 + 3 * scale;
         return [at[0] + Math.cos(a) * d, at[1] + Math.sin(a) * d];
     };
-    const beside = [0.5, 0.35, 0.65, 0.25, 0.75].flatMap(t => [1, -1].map(side => off(cablePoint(c, t), cableAngle(c, t) + (side * Math.PI) / 2)));
+    const beside = [0.5, 0.35, 0.65, 0.25, 0.75].flatMap(t => [Math.PI / 2, -Math.PI / 2].map(turn => off(cablePoint(c, t), cableAngle(c, t) + turn)));
     const spot = [...beside, off(c.p0, cableAngle(c, 0) + Math.PI)].find(clear) ?? cablePoint(c, 0.5);
     avoid.push(tag(g, label, spot[0], spot[1], px, color));
 }
@@ -163,14 +158,8 @@ function cableTag(g: G, c: Cable, label: string, avoid: Box[], scale: number, co
 function pulse(g: G, c: Cable, t: number, s: number) {
     if (t < 0 || t > 1) return;
     const [x, y] = cablePoint(c, t);
-    g.fillStyle = `rgba(255,255,255,${0.2 * (1 - t)})`;
-    g.beginPath();
-    g.arc(x, y, 6 * s, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = `rgba(255,255,255,${1 - t * 0.6})`;
-    g.beginPath();
-    g.arc(x, y, 2.4 * s, 0, Math.PI * 2);
-    g.fill();
+    disc(g, x, y, 6 * s, `rgba(255,255,255,${0.2 * (1 - t)})`);
+    disc(g, x, y, 2.4 * s, `rgba(255,255,255,${1 - t * 0.6})`);
 }
 
 function drawCentre(g: G, l: RoutingLayout, v: DrawInput) {
@@ -199,14 +188,14 @@ function drawCentre(g: G, l: RoutingLayout, v: DrawInput) {
     // The attribution shows whole and clear of the outline: on two lines when the circle is narrower
     // than it at that height, each on a black ground where it still crosses.
     const apx = fontPx(8, s), cut = ATTRIBUTION.lastIndexOf(' · ');
-    const chord = (at: number) => 2 * Math.sqrt(Math.max(0, r * r - (at - cy) ** 2)) - 16 * s;
+    const room = 2 * Math.sqrt(Math.max(0, r * r - (y + apx - cy) ** 2)) - 16 * s; // the circle's width at the line's foot
     g.font = `${apx}px ${MONO}`;
-    const parts = g.measureText(ATTRIBUTION).width <= chord(y + apx) || cut < 0 ? [ATTRIBUTION] : [ATTRIBUTION.slice(0, cut), ATTRIBUTION.slice(cut + 3)];
+    const parts = g.measureText(ATTRIBUTION).width <= room || cut < 0 ? [ATTRIBUTION] : [ATTRIBUTION.slice(0, cut), ATTRIBUTION.slice(cut + 3)];
     parts.forEach((part, i) => {
         const py = y + i * apx * LINE_H, w = g.measureText(part).width + 6 * s;
         g.fillStyle = '#000';
         g.fillRect(cx - w / 2, py - 1, w, apx + 2);
-        text(g, part, cx, py, apx, '#888', 'center');
+        text(g, part, cx, py, apx, ATTRIBUTION_ROW[1], 'center');
     });
 }
 
@@ -222,8 +211,9 @@ function drawVisual(g: G, b: Box, v: DrawInput) {
     row(glyph, 3, 6 * s).forEach((cell, i) => {
         swarmPanel(g, { ...cell, h: cell.h - labelH }, v.swarms[SWARM_KEYS[i]]);
         const sw = VISUAL_FACTS.swarms[SWARM_KEYS[i]], full = `${sw.label} ${sw.agents}`;
-        const label = fit(g, full, cell.w, px) === full ? full : fit(g, sw.label, cell.w, px); // a narrow cell drops the count first
-        text(g, label, cell.x + cell.w / 2, cell.y + cell.h - labelH + 2 * s, px, '#bbb', 'center');
+        g.font = `${px}px ${MONO}`;
+        const label = g.measureText(full).width <= cell.w ? full : sw.label; // a narrow cell drops the count first
+        text(g, label, cell.x + cell.w / 2, cell.y + cell.h - labelH + 2 * s, px, '#bbb', 'center', cell.w);
     });
     lines(g, rows, textBox, s);
 }
@@ -267,8 +257,8 @@ function drawFab(g: G, b: Box, v: DrawInput) {
 // The cards that carry a LIVE / SIMULATED / ≈ badge keep it in view whatever else has to give.
 
 function drawSound(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, live = v.live, sv = live.sound, patch = sv.source === 'patch' ? v.patch : null;
-    const r = sv.rates, telemetry = sv.chordSource === 'live' || r.tones.live || r.grains.live || r.kick.live;
+    const s = v.scale, live = v.live, sv = live.sound, patch = sv.source === 'patch' ? v.patch : null, r = sv.rates;
+    const heard = patch ? sv.chordSource === 'live' || r.tones.live || r.grains.live || r.kick.live : live.rateSource === 'live';
     const rows: [string, string][] = patch ? [
         ['Max reads activity + burst flags at /index', '#bbb'],
         [`tones ${rateText(r.tones, 1)} · grains ${rateText(r.grains, 0)} · kick ${rateText(r.kick)}`, '#888'],
@@ -276,10 +266,8 @@ function drawSound(g: G, b: Box, v: DrawInput) {
         [v.patch ? 'no patch data at this /index: ≈ from spikes' : 'patch data not linked: ≈ from spikes', '#bbb'],
         [`rate ${Math.round(live.rate)}/100 ms · ${live.burst.inBurst ? 'BURST' : 'quiet'} · ends ${live.burst.ends}`, '#888'],
     ];
-    const badge: [string, string] = patch
-        ? [telemetry ? 'LIVE · from the patch' : `PATCH RULES${sv.chordSource === 'computed' ? ' · chord ≈' : ''}`, telemetry ? '#fff' : '#777']
-        : [live.rateSource === 'live' ? 'LIVE · from the patch' : SOUND_FACTS.badge, live.rateSource === 'live' ? '#fff' : '#777'];
-    const { glyph, textBox } = cardParts(g, b, s, [...rows, badge]);
+    rows.push(heard ? ['LIVE · from the patch', '#fff'] : [patch ? `PATCH RULES${sv.chordSource === 'computed' ? ' · chord ≈' : ''}` : SOUND_FACTS.badge, '#777']);
+    const { glyph, textBox } = cardParts(g, b, s, rows);
     if (patch) {
         // The pass's activity and flags over the chord strip; the chord, large, at the right.
         const nameW = Math.min(glyph.w * 0.3, 74 * s), left: Box = { ...glyph, w: glyph.w - nameW - 8 * s };
@@ -289,16 +277,19 @@ function drawSound(g: G, b: Box, v: DrawInput) {
     } else {
         rateLine(g, { ...glyph, y: glyph.y + glyph.h * 0.15, h: glyph.h * 0.7 }, live.rateHistory, live.rateHead, live.peak);
     }
-    linesKeepLast(g, rows, [badge], textBox, s);
+    linesKeepLast(g, rows, textBox, s);
 }
 
 function drawSolenoids(g: G, b: Box, v: DrawInput) {
     const s = v.scale, live = v.live;
-    const rows: [string, string][] = [[`${live.backboneSlots.length} backbone of ${live.neurons.length || '—'}`, '#aaa'], ['Max → Daisy Seed · <27 bits>', '#777']];
-    const badge = strikeCaption(live.strikeSource, v.mode, live.strikes);
-    const { glyph, textBox } = cardParts(g, b, s, [...rows, badge]);
+    const rows: [string, string][] = [
+        [`${live.backboneSlots.length} backbone of ${live.neurons.length || '—'}`, '#aaa'],
+        ['Max → Daisy Seed · <27 bits>', '#777'],
+        strikeCaption(live.strikeSource, v.mode, live.strikes),
+    ];
+    const { glyph, textBox } = cardParts(g, b, s, rows);
     strikers(g, glyph, live.strikeGlow);
-    linesKeepLast(g, rows, [badge], textBox, s);
+    linesKeepLast(g, rows, textBox, s);
 }
 
 function drawRobot(g: G, b: Box, v: DrawInput) {
@@ -307,37 +298,37 @@ function drawRobot(g: G, b: Box, v: DrawInput) {
         ['visitor → ultrasonic 0–100 cm → servo 0–180°', '#aaa'],
         [live.arms.map(armPhaseText).join(' · '), '#888'],
         ['arm 1 → Max: the arpeggio\'s pace', '#bbb'],
+        robotCaption(live.arms.some(armIsLive)),
     ];
-    const badge = robotCaption(live.arms.some(armIsLive));
-    const { glyph, textBox } = cardParts(g, b, s, [...rows, badge]);
+    const { glyph, textBox } = cardParts(g, b, s, rows);
     armsPanel(g, glyph, live.arms, s, { cone: true, labels: false });
-    linesKeepLast(g, rows, [badge], textBox, s);
+    linesKeepLast(g, rows, textBox, s);
 }
 
 export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
-    const { cards, audioFrame } = l, s = v.scale, live = v.live;
+    const { cards, audioFrame } = l, s = v.scale, live = v.live, stacked = l.orientation === 'landscape';
     g.save();
     g.globalAlpha = v.dim;
 
     // The audio computer: sound, solenoids and the robot's sensors meet in one Max patch.
     // Its label stays clear of the cables, which come in on the left in portrait.
     frame(g, audioFrame, '#1c1c1c');
-    const across = l.orientation === 'landscape';
-    text(g, 'AUDIO COMPUTER · Max/MSP', across ? audioFrame.x + 8 * s : audioFrame.x + audioFrame.w - 8 * s, audioFrame.y + 3 * s, fontPx(9, s), '#888', across ? 'left' : 'right');
+    text(g, 'AUDIO COMPUTER · Max/MSP', stacked ? audioFrame.x + 8 * s : audioFrame.x + audioFrame.w - 8 * s, audioFrame.y + 3 * s, fontPx(9, s), '#888', stacked ? 'left' : 'right');
 
     // Cables out of the organoid; their tags go on after the cards.
     const flow = live.moving && v.phase !== 'off' ? -v.now / DASH_FLOW_MS : undefined;
-    const routes: [keyof RoutingLayout['cables'], CableKind][] = [['visual', 'stream'], ['sound', 'stream'], ['led', 'event'], ['fab', 'offline']];
+    const routes: [keyof RoutingLayout['cables'], CableKind, string][] = [
+        ['visual', 'stream', `OSC :${VISUAL_FACTS.port}`], ['sound', 'stream', 'OSC'], ['led', 'event', 'SERIAL'], ['fab', 'offline', 'before the show'],
+    ];
     for (const [key, kind] of routes) {
-        const lit = v.hover === key, look = lead(kind, lit, flow);
-        drawCable(g, l.cables[key], look, s);
-        jack(g, l.cables[key], look.color, s);
+        const c = l.cables[key], look = lead(kind, v.hover === key, flow);
+        drawCable(g, c, look, s);
+        disc(g, c.p0[0], c.p0[1], 2.4 * s, look.color); // a jack on the rim where it leaves the organoid
     }
     if (live.lastLedFrame) pulse(g, l.cables.led, live.ledAgeMs / PULSE_MS, s);
 
     // Max → solenoids: a short lead between the two cards, lit by the strikes.
     const so = cards.sound, rb = cards.robot;
-    const stacked = l.orientation === 'landscape';
     let strike = 0;
     for (const e of live.strikeGlow) strike = Math.max(strike, e);
     drawCable(g, l.strikes, { color: `rgba(255,255,255,${0.3 + 0.7 * strike})`, width: 1.6, halo: 0.16 * strike }, s);
@@ -374,10 +365,7 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
 
     // Tags on top of everything: the protocols, and the two links inside the audio computer.
     const boxes: Box[] = Object.values(cards); // tags join it as they're placed
-    cableTag(g, l.cables.visual, `OSC :${VISUAL_FACTS.port}`, boxes, s);
-    cableTag(g, l.cables.sound, 'OSC', boxes, s);
-    cableTag(g, l.cables.led, 'SERIAL', boxes, s);
-    cableTag(g, l.cables.fab, 'before the show', boxes, s, '#777');
+    for (const [key, kind, label] of routes) cableTag(g, l.cables[key], label, boxes, s, kind === 'offline' ? '#777' : '#888');
     cableTag(g, l.strikes, 'strikes', boxes, s);
     const px = fontPx(8, s);
     const [end, corner] = [loop[3], loop[2]];
