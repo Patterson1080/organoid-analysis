@@ -51,14 +51,24 @@ A depiction of where the signal goes, inside the SHOW panel; it only reads, and 
 SHOW_STATE / playbackTimeRef ─┐
 emitFrameOutputs → lastLedFrameRef ─┤
 OSC_MSG /routing/* → applyTelemetry ─┼─▶ RoutingView (30 fps rAF) ─ advanceLive ─▶ drawOverview | drawDetail
-data/organoid_firing.f16, vessel.gcode ─┘          (src/show/routing/live.ts)   (src/components/routing/)
+data/organoid_firing.f16, vessel.gcode, ─┤          (src/show/routing/live.ts)   (src/components/routing/)
+  activitylevel.wav + burstflags.wav,  ─┤
+  termite_slices.bin                   ─┘
 ```
 
 **Rules** live in `src/show/routing/`. They're pure, Node-tested modules with explicit `.ts` imports:
 - `facts.ts`: every number and label shown, from the running system: the 11.3 scene, the G-code, the bridge.
 - `layout.ts`: boxes from the area's size, landscape at w/h ≥ 1.1, else portrait; type scale.
 - `firingBlob.ts`: EoC's `TFR1` half-float blob of normalized rates, one row per index.
-- `soundFeatures.ts`: population rate, burst ends, the VISAP mappings.
+- `soundFeatures.ts`: population rate, burst ends, the VISAP mappings (the SOUND fallback without the patch's data).
+- `wav.ts`: the patch's data buffers (16-bit PCM mono, one sample per index).
+- `maxPatch.ts`: the sound patch's own rules, from `dev/audio/*.maxpat`.
+  - **Tables:** tone, grain and kick intervals; grain length and odds; kick echoes; the 17-step chord counter with its notes; arm 1's arpeggio interval.
+  - **`PatchData`:** the activity and flags, with hold-aware intervals: a table miss keeps the last value, as Max does.
+- `soundEvents.ts`: the voices played forward in wall-clock time, at the patch's rates and odds, with a seeded generator. Covers tones, grains, kicks through Max's three echo `delay`s, 6 drones and the arpeggio, into a 4096-event ring.
+- `soundLayout.ts`: the SOUND detail's panels; the activity envelope per pixel column.
+- `slicer.ts` · `termiteSlices.ts`: mesh → horizontal contours (chained, RDP-simplified) → `TSL1`, per print segment. `scripts/termite-slices.mjs` runs them on the OBJ.
+- `sliceView.ts`: both artifacts as layer stacks (vessel layers, termite slices with exploded segments), the turntable projection, slice stride and depth alpha, the FAB panels.
 - `vessel.ts`: G-code → layers centred on the axis; layer ≈ linear in the index; printed cut-off.
 - `tour.ts`: 20 s stops, 60 s idle resume.
 - `telemetry.ts`: the `/routing/*` contract and freshness.
@@ -69,14 +79,25 @@ data/organoid_firing.f16, vessel.gcode ─┘          (src/show/routing/live.ts
   - **Spikes:** a forward step up to 250 ms keeps all its spikes; a bigger or backwards jump keeps 30 ms.
   - **Held playhead:** after 150 ms still, the playhead counts as stopped. The firing fades like EoC's 0.5 s and the `/index` dashes stop.
   - **Also held:** glows, strikes, the rate and burst state (fresh telemetry wins), the LED pixels as `DualLED_Currents.ino` draws `F:`/`C:`, the serial lines, and the arms.
+  - **Sound view:** the patch at the last index Max heard; it holds through pauses and OFF, since the patch has no stop.
+    - **Chord step:** LIVE `harmony` when fresh; else in the show, flags counted from pass 1 over the show's range; else unknown (local playback skips most indices).
+    - **Arpeggio:** only from fresh arm 1 telemetry.
+    - **Events:** the event sim steps every frame.
 
-**View:** `src/components/RoutingView.tsx` owns the canvas, the loop, the tour and the operator settings (`src/utils/routingSettings.ts`). The loop is paused when hidden or off-screen. Drawing lives in `src/components/routing/` (`glyphs.ts`, `overview.ts`, `details.ts`).
+**View:** `src/components/RoutingView.tsx` owns the canvas, the loop, the tour and the operator settings (`src/utils/routingSettings.ts`). The loop is paused when hidden or off-screen.
+
+Drawing lives in `src/components/routing/`:
+
+- `glyphs.ts`, `overview.ts`, `details.ts`;
+- `soundGlyphs.ts`: the activity strip, chord strip, score, rule charts, harmony and speakers;
+- `artifactGlyphs.ts`: slice stacks, the print-preview plan view, and the schematic. The stacks render into offscreen canvases at most every 100 ms (`ArtifactCache`, owned by RoutingView).
 
 **Inputs** come through ShowPanel:
 - the show snapshot, or `playbackTimeRef` when no show runs;
 - `lastLedFrameRef`: the frame `emitFrameOutputs` computed, sent or not; during the show the bridge runs the same `ledStep` on the same slices;
 - `routingTelemetryRef`: `OSC_MSG` for `/routing/*`, applied before `setLastOscMessage` so telemetry never re-renders App;
-- the firing blob and the vessel, fetched once from the bridge's `data/` (`server/data-files.js`) when `/data/status` lists them.
+- the firing blob, the vessel, the patch's two WAVs (as `PatchData`) and the termite slices, fetched once from the bridge's `data/` (`server/data-files.js`) when `/data/status` lists them;
+- the playhead's `pass` and `range`: the show's, or pass 1 over the whole recording.
 
 **Sizing:** outside presentation the canvas is width × 9/16, at least 420 px. In presentation the raster stays at 160 px and the routing canvas takes `innerHeight` minus its top, at least 360 px.
 

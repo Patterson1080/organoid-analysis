@@ -448,3 +448,15 @@ The page under test must never connect to `127.0.0.1:8080/8081`. Visual checks u
 - Does anything fade the sound in OFF? `r cueAudio` has no sender in the patches given.
 - Is `backboneSpikes.txt` the 27 backbone columns of `spikes.csv`?
 - Should Max send `/routing/sound/harmony` (counter 0–17) to make the chord exact?
+
+## Amendments (during the build)
+
+- **Local playback.** The chord is unknown, so tones, grains and the arpeggio tick unpitched, drawn hollow on the staff's middle row. The plan's chord-A stand-in was dropped.
+- **Next flag.** `maxPatch.nextFlag` gives the harmony panel its "next flag in ≈ N s".
+- **Source caption.** In patch mode the SOUND source caption names what Max hears: `activitylevel.wav + burstflags.wav`. The fallback chain no longer says Max "reads the matrix".
+- **Rail tile.** The FAB rail tile shows the turning termite form when it's linked.
+- **Segments view.**
+  - It holds a fixed angle, so the print-preview slice reads steadily; the turning view carries the rotation.
+  - Segment labels sit at their real heights: `drawStack` returns its height → screen mapping.
+- **Grain glow.** In the output panel, grains flicker briefly and dimmer (0.4 s), so the positions keep contrast at 100+ grains/s.
+- **Termite asset.** It holds 286 heights, 2 825 polylines and 133 k points (0.55 MB), at step 2 and tolerance 0.25.
