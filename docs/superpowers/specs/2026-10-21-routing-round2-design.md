@@ -88,3 +88,4 @@
 - **Drawn curl.** It's capped with the tip at about 45° at full pull. At the first, steeper setting, idle arms (nobody near means 180°) curled into hooks that crossed their neighbours.
 - **Arm layout.** The arms anchor a little left of centre, and the panel is clipped, because every arm curls toward its tendon side.
 - **Schematic heights.** The schematic draws the two pieces at their real heights (452 mm against ≈ 700 mm). Only the frame and fibres stay out of scale.
+- **Metro arguments, later undone.** Diarmid manages the Max patches, and they're the ground truth. So the `metro 4800` / `metro 9600` edit was reverted, and `dev/audio` is as he left it.

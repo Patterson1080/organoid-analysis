@@ -43,6 +43,6 @@ On the overview, make the signal cables curves and make sure they're visible. Be
 | Question | Answer | What changes |
 |---|---|---|
 | Which arm firmware | most likely the rebuild (shown three times since CURRENTS) | the copy leads with the rebuild; the CURRENTS sketch's `proximitydata:` the Max patch doesn't route |
-| `+ 1` in termiteKick | yes | blocked: editing `dev/audio/termiteKick.maxpat` needs the user's permission (shared files); the view keeps showing the patch as wired until it changes |
+| `+ 1` in termiteKick | yes; then, since Diarmid manages the Max patches: keep his patches as they are, they're the ground truth | no change; the view shows the patch as wired (half the kicks silent, the rest on speakers 3–4). The round-2 `metro 4800` / `metro 9600` edit to the local copy is undone for the same reason |
 | Kick density fallback | either is fine | stays on the paper's mapping |
 | Merge to `origin/main` | after the feedback | merged and pushed |
