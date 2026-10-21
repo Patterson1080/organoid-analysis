@@ -49,8 +49,11 @@ export const VISUAL_OUTPUT_CHAINS: Record<VisualOutput, string[]> = {
     'td-sd': ['Unity', 'Spout/Syphon/NDI', 'TD projection mapping', '+ StreamDiffusion (TD)', 'projection'],
 };
 
-/** The patch isn't on this machine: the description is SIGGRAPH 2026's, the ranges VISAP 2025's. */
+/** The papers' description (SIGGRAPH 2026) and ranges (VISAP 2025), for when the patch's data
+ *  files aren't linked into data/; with them the view follows maxPatch.ts and these files. */
 export const SOUND_FACTS = {
+    patchFile: 'SimulacraNaturae_4ch_realtime.maxpat',
+    serialFile: 'SimulacraNaturaeSerialComsCurrents.maxpat',
     descriptionSource: 'SIGGRAPH 2026',
     rangesSource: 'VISAP 2025',
     tone: [0.21, 20.0] as [number, number],
