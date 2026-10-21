@@ -82,3 +82,9 @@
 ## Unresolved questions
 
 - Which arm firmware runs in this show: the CURRENTS sketch (`proximitydata:`) or the rebuild's legacy serial (`sensordata:`)? Only the latter reaches the arpeggio as the Max patch is wired.
+
+## Amendments (during the build)
+
+- **Drawn curl.** It's capped with the tip at about 45° at full pull. At the first, steeper setting, idle arms (nobody near means 180°) curled into hooks that crossed their neighbours.
+- **Arm layout.** The arms anchor a little left of centre, and the panel is clipped, because every arm curls toward its tendon side.
+- **Schematic heights.** The schematic draws the two pieces at their real heights (452 mm against ≈ 700 mm). Only the frame and fibres stay out of scale.

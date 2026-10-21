@@ -68,21 +68,23 @@ data/organoid_firing.f16, vessel.gcode, ─┤          (src/show/routing/live.t
 - `soundEvents.ts`: the voices played forward in wall-clock time, at the patch's rates and odds, with a seeded generator. Covers tones, grains, kicks through Max's three echo `delay`s and its half-closed output gate, 6 drones and the arpeggio, into a 4096-event ring.
 - `soundLayout.ts`: the SOUND detail's panels; the activity envelope per pixel column.
 - `slicer.ts` · `termiteSlices.ts`: mesh → horizontal contours (chained, RDP-simplified) → `TSL1`, per print segment. `scripts/termite-slices.mjs` runs them on the OBJ.
-- `sliceView.ts`: both artifacts as layer stacks (vessel layers, termite slices with exploded segments), the turntable projection, slice stride and depth alpha, the FAB panels.
+- `sliceView.ts`: both artifacts as layer stacks (vessel layers, termite slices with exploded segments), the turntable projection, slice stride and depth alpha, the FAB panels, and the pair layout that stands them side by side at one scale.
 - `vessel.ts`: G-code → layers centred on the axis; layer ≈ linear in the index; printed cut-off.
 - `tour.ts`: 20 s stops, 60 s idle resume.
 - `telemetry.ts`: the `/routing/*` contract and freshness.
 - `swarm.ts`: stand-in agents seeded on the neuron positions.
+- `arms.ts`: the arms' firmware rule: Arduino `map` to a servo target, 10° deadband, 200°/s slew, 100 ms settle, 2 s cooldown; and the stand-in visitors.
 - `playhead.ts`: which clock to follow: the show's while it runs and the bridge is connected, else local playback.
 - `captions.ts`: state-dependent copy (the playhead line, where the firing comes from, the attribution under every detail source).
 - `live.ts`: per-frame state from the playhead.
   - **Spikes:** a forward step up to 250 ms keeps all its spikes; a bigger or backwards jump keeps 30 ms.
   - **Held playhead:** after 150 ms still, the playhead counts as stopped. The firing fades like EoC's 0.5 s and the `/index` dashes stop.
   - **Also held:** glows, strikes, the rate and burst state (fresh telemetry wins), the LED pixels as `DualLED_Currents.ino` draws `F:`/`C:`, the serial lines, and the arms.
-  - **Sound view:** the patch at the last index Max heard; it holds through pauses and OFF, since the patch has no stop.
+  - **Sound view:** the patch at the last index Max heard; its values hold through pauses and OFF.
     - **Chord step:** LIVE `harmony` when fresh; else in the show, flags counted from pass 1 over the show's range; else unknown (local playback skips most indices).
-    - **Arpeggio:** only from fresh arm 1 telemetry.
-    - **Events:** the event sim steps every frame.
+    - **Arpeggio:** from arm 1's distance, LIVE or simulated.
+    - **Events:** the event sim steps only while `/index` flows; with the recording stopped nothing triggers (the room's behaviour).
+  - **Arms:** each runs `arms.ts` on its distance: the arm's own via `/routing/robot/<id>/proximity`, else a stand-in visitor. LIVE servo and touch override; touch fades the fibres in over 1 s; the drawn spine curls with the angle and lags toward the tip.
 
 **View:** `src/components/RoutingView.tsx` owns the canvas, the loop, the tour and the operator settings (`src/utils/routingSettings.ts`). The loop is paused when hidden or off-screen.
 
@@ -90,6 +92,7 @@ Drawing lives in `src/components/routing/`:
 
 - `glyphs.ts`, `overview.ts`, `details.ts`;
 - `soundGlyphs.ts`: the activity strip, chord strip, score, rule charts, harmony and speakers;
+- `armGlyphs.ts`: the arms as built (pod, spine through its vertebrae, leaves, tendon, touch-lit fibres, the tip's sensor cone with the visitor) and the distance → angle rule chart.
 - `artifactGlyphs.ts`: slice stacks, the print-preview plan view, and the schematic. The stacks render into offscreen canvases at most every 100 ms (`ArtifactCache`, owned by RoutingView).
 
 **Inputs** come through ShowPanel:
