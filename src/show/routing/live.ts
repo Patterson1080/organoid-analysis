@@ -5,6 +5,8 @@
 
 import type { Neuron, SpikeEvent } from '../../types';
 import { neuronBounds } from '../ledFrame.ts';
+import { ARM_RULES, createArmMotion, stepArmMotion, visitorCm } from './arms.ts';
+import type { ArmMotion } from './arms.ts';
 import type { LedFrame } from '../ledFrame.ts';
 import { spikesBetween } from '../showMath.ts';
 import { BACKBONE_COUNT, LED_FACTS, ROBOT_FACTS, VISUAL_FACTS } from './facts.ts';
@@ -61,7 +63,7 @@ export interface SoundView {
     nextFlag: number | null;
     chordStep: number | null;
     chordSource: 'computed' | 'live' | 'unknown';
-    arm1Cm: number | null; // fresh telemetry only: no arm, no arpeggio
+    arm1: { cm: number; live: boolean }; // arm 1 paces the arpeggio; simulated when it doesn't report here
     arpMs: number | null;
     rates: { tones: Rate; grains: Rate; kick: Rate }; // what the view prints: Max's own when it reports them
     sim: SoundSim;
@@ -73,11 +75,13 @@ export interface Rate {
 }
 
 export interface Arm {
-    th: number[]; // segment angles from vertical, top to bottom
-    proximity: number; // metres
-    servo: number; // degrees
-    live: boolean; // servo from telemetry rather than simulated
-    touch: boolean; // a fresh touch reading from telemetry
+    th: number[]; // the drawing's spine angles from vertical, top to bottom, lagging like a hanging arm
+    motion: ArmMotion; // the firmware's rules, run here on the distance it reads
+    cm: number; // the distance the arm last read: 0–100, 100 = nobody there
+    servo: number; // angle now: telemetry's when fresh, else the motion's
+    touch: boolean;
+    light: number; // fibre light 0..1; a touch fades it in
+    live: { proximity: boolean; servo: boolean; touch: boolean }; // which values came from the arm itself
 }
 
 /** DualLED_Currents.ino's palette numbers; 0 is the white baseline. */
@@ -130,6 +134,7 @@ const HISTORY_STEP_MS = 40;
 const STRIKE_LOG = 8;
 const SOUND_LIVE = ['harmony', 'tones', 'grains', 'kick'] as const;
 const GRAIN_LFO_MID = 0.5; // the grain gate's ≈125 s LFO has an unknown phase: drawn at its midpoint
+const FIBRE_FADE_MS = 1000; // the rebuild's led_fade_ms: touch fades the fibres in and out
 
 export function createLiveState(neurons: Neuron[], spikes: SpikeEvent[]): LiveState {
     const b = neuronBounds(neurons) ?? { minX: 0, maxX: 1, minY: 0, maxY: 1 };
@@ -156,11 +161,14 @@ export function createLiveState(neurons: Neuron[], spikes: SpikeEvent[]): LiveSt
         rate: 0, peak: peakRate(spikes), burst: { inBurst: false, ends: 0 },
         rateHistory: new Float32Array(HISTORY), rateHead: 0, rateClock: 0, rateSource: 'computed', soundLive: {},
         ledCells: new Float32Array(256), ledColor: new Uint8Array(256), ledLines: [], lastLedFrame: null, ledFrames: 0, ledAgeMs: 0,
-        arms: Array.from({ length: ROBOT_FACTS.arms }, () => ({ th: [0, 0, 0], proximity: 0, servo: 90, live: false, touch: false })),
+        arms: Array.from({ length: ROBOT_FACTS.arms }, () => ({
+            th: [0, 0, 0], motion: createArmMotion(), cm: ARM_RULES.rangeCm, servo: ARM_RULES.rest, touch: false, light: 0,
+            live: { proximity: false, servo: false, touch: false },
+        })),
         sound: {
             source: 'fallback', heardIndex: null, v: 0, a: 0, toneMs: null, kickMs: null, held: { tone: false, kick: false },
             grainTickMs: null, grainLen: null, grainChance: 0, threshold: 10, passFlags: 0, flagsSoFar: 0, nextFlag: null,
-            chordStep: null, chordSource: 'unknown', arm1Cm: null, arpMs: null,
+            chordStep: null, chordSource: 'unknown', arm1: { cm: ARM_RULES.rangeCm, live: false }, arpMs: null,
             rates: { tones: { perSec: 0, live: false }, grains: { perSec: 0, live: false }, kick: { perSec: 0, live: false } },
             sim: createSoundSim(1),
         },
@@ -263,13 +271,14 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
     s.ledAgeMs += dt;
     if (input.ledFrame && input.ledFrame !== s.lastLedFrame) applyLedFrame(s, input.ledFrame);
 
-    stepSound(s.sound, s.soundLive, input, dt);
     stepArms(s, telemetry, now, dt);
+    stepSound(s.sound, s.soundLive, s.arms[0], s.moving, input, dt);
 }
 
 /** The patch at the last index Max heard (it holds while /index is still), the chord its counter is
- *  on, arm 1's arpeggio, and its voices played forward: Max's metros run on whatever happens. */
-function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], input: LiveInput, dt: number) {
+ *  on, arm 1's arpeggio, and its voices played forward while /index flows: without the recording
+ *  playing, nothing triggers (the team's word for the room). */
+function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, moving: boolean, input: LiveInput, dt: number) {
     const { patch, telemetry, now, range } = input;
     if (input.index !== null) sv.heardIndex = input.index;
     const v = patch && sv.heardIndex !== null ? activityAt(patch, sv.heardIndex) : null;
@@ -320,10 +329,10 @@ function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], input: Live
         kick: rate(soundLive.kick, sv.kickMs ? (1000 / sv.kickMs) * audibleKicks() : 0),
     };
 
-    const proximity = telemetry?.robot[0]?.proximity;
-    sv.arm1Cm = proximity && fresh(proximity, now) ? proximity.value : null;
-    sv.arpMs = sv.arm1Cm === null ? null : arpIntervalMs(sv.arm1Cm);
+    sv.arm1 = { cm: arm1.cm, live: arm1.live.proximity };
+    sv.arpMs = arpIntervalMs(arm1.cm);
 
+    if (!moving) return;
     stepSoundSim(sv.sim, {
         now, dtMs: dt, notes: sv.chordStep === null ? null : chordOf(sv.chordStep).notes,
         toneMs: sv.toneMs, kickMs: sv.kickMs, grainTickMs: sv.grainTickMs, grainChance: sv.grainChance, grainLen: sv.grainLen, arpMs: sv.arpMs,
@@ -358,20 +367,29 @@ function applyLedFrame(s: LiveState, frame: LedFrame) {
     s.ledAgeMs = 0;
 }
 
-/** Servo from telemetry, or a slow simulated visitor; the hanging segments trail it (gravity). */
+// The tendon curls the spine toward its side as the servo turns: these are the three drawn
+// segments' angles from vertical at full pull, the tip curling most.
+const CURL = [Math.PI * 0.22, Math.PI * 0.5, Math.PI * 0.8];
+
+/** Each arm runs the firmware's rules on the distance it reads: the arm's own reading when it reports
+ *  one, else a stand-in visitor. Fresh telemetry overrides the angle and the touch; the drawn spine
+ *  follows the angle with a lag that grows toward the tip, as a hanging arm swings. */
 function stepArms(s: LiveState, telemetry: Telemetry | null, now: number, dt: number) {
     const ease = (rate: number) => 1 - Math.exp(-(dt / 1000) * rate);
     s.arms.forEach((arm, k) => {
         const t = telemetry?.robot[k];
+        const cm = t?.proximity && fresh(t.proximity, now) ? t.proximity.value : null;
         const servo = t?.servo && fresh(t.servo, now) ? t.servo.value : null;
-        const proximity = t?.proximity && fresh(t.proximity, now) ? t.proximity.value / 100 : null; // cm → m
-        const p = 0.5 + 0.5 * Math.sin((now / 1000) * 0.45 + k * 2.1);
-        arm.live = servo !== null;
-        arm.touch = !!(t?.touch && fresh(t.touch, now) && t.touch.value >= 0.5);
-        arm.servo = servo ?? (1 - p) * 180;
-        arm.proximity = proximity ?? 0.3 + p * 2.7;
-        arm.th[0] += (((arm.servo - 90) / 90) * (Math.PI / 5) - arm.th[0]) * ease(5);
-        arm.th[1] += (0.8 * arm.th[0] - arm.th[1]) * ease(2.5);
-        arm.th[2] += (0.8 * arm.th[1] - arm.th[2]) * ease(1.2);
+        const touch = t?.touch && fresh(t.touch, now) ? t.touch.value >= 0.5 : null;
+        arm.live = { proximity: cm !== null, servo: servo !== null, touch: touch !== null };
+        stepArmMotion(arm.motion, cm ?? visitorCm(k, now), dt);
+        arm.cm = cm ?? arm.motion.cm;
+        arm.servo = servo ?? arm.motion.pos;
+        arm.touch = touch ?? false;
+        arm.light = Math.min(1, Math.max(0, arm.light + (arm.touch ? 1 : -1) * (dt / FIBRE_FADE_MS)));
+        const pull = Math.min(1, Math.max(0, arm.servo / ARM_RULES.servoMax));
+        arm.th[0] += (pull * CURL[0] - arm.th[0]) * ease(5);
+        arm.th[1] += (pull * CURL[1] - arm.th[1]) * ease(2.5);
+        arm.th[2] += (pull * CURL[2] - arm.th[2]) * ease(1.2);
     });
 }

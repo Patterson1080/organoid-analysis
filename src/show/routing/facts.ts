@@ -73,12 +73,15 @@ export const LED_FACTS = { trail: 5, burstOver: 5, perFrameCap: 10, baud: 115200
  *  board; all zeros 32 ms after the last line. The file isn't on this machine, so strikes stay ≈. */
 export const SOLENOID_FACTS = { file: 'backboneSpikes.txt', board: 'Daisy Seed', baud: 9600, releaseMs: 32 };
 
+/** The arms in this show: dev/arms/ProximityServoArms_Currents.ino on one board, read by Max over
+ *  serial; the modular rebuild (dev/arms/modular) mirrors arms 1–3 to the bridge as /routing/robot/…. */
 export const ROBOT_FACTS = {
     arms: 3,
-    sensor: 'HC-SR04',
-    servo: 'MG995',
-    range: [0, 180] as [number, number],
-    badge: 'SIMULATED · sensors go to the audio computer',
+    sensor: 'ultrasonic',
+    servo: 'servo',
+    sketch: 'ProximityServoArms_Currents.ino',
+    rebuild: 'Haptophylla modular',
+    badge: "SIMULATED · the firmware's rules, stand-in visitors",
     dormant: '/inject/arm1..3 · off in this show',
 };
 

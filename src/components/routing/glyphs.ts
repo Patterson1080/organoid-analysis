@@ -202,7 +202,7 @@ export function hangingArms(g: G, b: Box, arms: Arm[], scale: number): void {
     const seg = (b.h - 16 * scale) / 3;
     arms.forEach((arm, k) => {
         let x = b.x + (k + 0.5) * (b.w / arms.length), y = b.y + 2 * scale;
-        g.fillStyle = arm.live ? '#fff' : '#ddd';
+        g.fillStyle = arm.live.servo ? '#fff' : '#ddd';
         g.fillRect(x - 3 * scale, y, 6 * scale, 4 * scale); // the servo
         for (const th of arm.th) {
             const nx = x + Math.sin(th) * seg, ny = y + Math.cos(th) * seg;

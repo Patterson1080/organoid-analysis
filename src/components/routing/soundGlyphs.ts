@@ -294,9 +294,11 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
         g.fillRect(b.x + 1, y3 + 1, spk * 2 + 4 * s - 2, rowH - 2);
     }
     text(g, '1–2', b.x + spk + 2 * s, y3 + (rowH - px) / 2, px, arpGlow > 0.5 ? '#000' : '#ccc', 'center');
-    const arpText: [string, string][] = sv.arm1Cm !== null
-        ? [[`arpeggio · arm 1 at ${Math.round(sv.arm1Cm)} cm`, '#fff'], [sv.arpMs === null ? 'stopped · LIVE' : `a note every ${Math.round(sv.arpMs)} ms · LIVE`, '#fff']]
-        : [['arpeggio · waiting for arm 1', '#888'], ['no arm, no arpeggio', '#666']];
+    const tag = sv.arm1.live ? 'LIVE' : 'SIMULATED', color = sv.arm1.live ? '#fff' : '#aaa';
+    const arpText: [string, string][] = [
+        [`arpeggio · arm 1 at ${Math.round(sv.arm1.cm)} cm${sv.arm1.cm >= 100 ? ' (nobody)' : ''}`, color],
+        [`${sv.arpMs === null ? 'stopped' : `a note every ${Math.round(sv.arpMs)} ms`} · ${tag}`, color],
+    ];
     g.save();
     const after: Box = { x: b.x + spk * 2 + 12 * s, y: y3 + (rowH - px * 1.45 * 2) / 2, w: b.w - spk * 2 - 12 * s, h: rowH };
     clipTo(g, after);

@@ -220,17 +220,63 @@ test('fresh harmony telemetry sets the chord', () => {
     assert.equal(s.sound.chordSource, 'live');
 });
 
-test('arm 1 telemetry drives the arpeggio; without it there is none', () => {
+test('the arpeggio follows arm 1, simulated or live', () => {
+    const quiet = createLiveState(neurons, spikes);
+    advanceLive(quiet, input({ index: 1, patch: patch(), now: 1000 }));
+    assert.equal(quiet.sound.arm1.live, false);
+    assert.equal(typeof quiet.sound.arpMs, 'number'); // the stand-in visitor's distance paces it
     const s = createLiveState(neurons, spikes);
     const t = createTelemetry();
     applyTelemetry(t, '/routing/robot/1/proximity', [50], 1000);
     advanceLive(s, input({ index: 1, patch: patch(), telemetry: t, now: 1000 }));
-    assert.equal(s.sound.arm1Cm, 50);
+    assert.deepEqual(s.sound.arm1, { cm: 50, live: true });
     assert.equal(s.sound.arpMs, 265);
-    const quiet = createLiveState(neurons, spikes);
-    for (let i = 1; i <= 20; i++) advanceLive(quiet, input({ index: 1, patch: patch(), now: i * 100, dtMs: 100 }));
-    assert.equal(quiet.sound.arpMs, null);
-    assert.equal(eventsSince(quiet.sound.sim, -Infinity).filter(e => e.kind === 'arp').length, 0);
+});
+
+test('live distance drives the computed angle', () => {
+    const s = createLiveState(neurons, spikes);
+    const t = createTelemetry();
+    applyTelemetry(t, '/routing/robot/1/proximity', [50], 1000);
+    advanceLive(s, input({ index: 1, telemetry: t, now: 1000 }));
+    assert.equal(s.arms[0].cm, 50);
+    assert.deepEqual(s.arms[0].live, { proximity: true, servo: false, touch: false });
+    assert.equal(s.arms[0].motion.target, 90);
+});
+
+test('live servo overrides the angle', () => {
+    const s = createLiveState(neurons, spikes);
+    const t = createTelemetry();
+    applyTelemetry(t, '/routing/robot/1/servo', [30], 1000);
+    advanceLive(s, input({ index: 1, telemetry: t, now: 1000 }));
+    assert.equal(s.arms[0].servo, 30);
+    assert.equal(s.arms[0].live.servo, true);
+});
+
+test('touch fades the fibre light in, and out after release', () => {
+    const s = createLiveState(neurons, spikes);
+    const t = createTelemetry();
+    for (let i = 1; i <= 12; i++) {
+        applyTelemetry(t, '/routing/robot/1/touch', [1], i * 100);
+        advanceLive(s, input({ index: 1, telemetry: t, now: i * 100, dtMs: 100 }));
+    }
+    assert.ok(s.arms[0].light > 0.95, `${s.arms[0].light}`);
+    for (let i = 13; i <= 24; i++) {
+        applyTelemetry(t, '/routing/robot/1/touch', [0], i * 100);
+        advanceLive(s, input({ index: 1, telemetry: t, now: i * 100, dtMs: 100 }));
+    }
+    assert.ok(s.arms[0].light < 0.05, `${s.arms[0].light}`);
+});
+
+test('no events while the playhead is still; they resume without a burst', () => {
+    const s = createLiveState(neurons, spikes);
+    let now = 0;
+    for (let i = 0; i < 10; i++) advanceLive(s, input({ index: 1 + (i % 2), patch: patch(), now: (now += 100), dtMs: 100 }));
+    const held = now;
+    for (let i = 0; i < 100; i++) advanceLive(s, input({ index: null, patch: patch(), now: (now += 100), dtMs: 100 }));
+    assert.equal(eventsSince(s.sound.sim, held + 1).length, 0);
+    const before = eventsSince(s.sound.sim, -Infinity).length;
+    advanceLive(s, input({ index: 1, patch: patch(), now: now + 16, dtMs: 16 }));
+    assert.ok(eventsSince(s.sound.sim, -Infinity).length - before <= 4, '10 s of backlog would be dozens');
 });
 
 test('fresh tone telemetry overrides the patch rate, marked LIVE', () => {
@@ -243,11 +289,11 @@ test('fresh tone telemetry overrides the patch rate, marked LIVE', () => {
     assert.ok(Math.abs(s.sound.rates.kick.perSec - 0.46875 / 3.2) < 1e-9); // audible kicks at 3200 ms
 });
 
-test('a held playhead keeps the last activity', () => {
+test('a held playhead keeps the last activity, and nothing triggers', () => {
     const s = createLiveState(neurons, spikes);
     advanceLive(s, input({ index: 1, patch: patch(), now: 0 }));
     for (let i = 1; i <= 100; i++) advanceLive(s, input({ index: null, patch: patch(), now: i * 100, dtMs: 100 }));
     assert.equal(s.sound.heardIndex, 1);
     assert.ok(Math.abs(s.sound.a - 0.45) < 1e-6);
-    assert.ok(eventsSince(s.sound.sim, 5000).some(e => e.kind === 'tone'));
+    assert.equal(eventsSince(s.sound.sim, 200).length, 0);
 });

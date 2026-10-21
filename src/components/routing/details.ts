@@ -251,7 +251,7 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
     g.save();
     clipTo(g, textBox);
     lines(g, [
-        ...live.arms.map((a, k) => [`arm ${k + 1} · ${a.proximity.toFixed(2)} m · servo ${Math.round(a.servo)}°${a.touch ? ' · touched' : ''} · ${a.live ? 'LIVE' : 'simulated'}`, a.live ? '#fff' : '#999'] as [string, string]),
+        ...live.arms.map((a, k) => [`arm ${k + 1} · ${Math.round(a.cm)} cm · servo ${Math.round(a.servo)}°${a.touch ? ' · touched' : ''} · ${a.live.proximity ? 'LIVE' : 'simulated'}`, a.live.proximity ? '#fff' : '#999'] as [string, string]),
         ['hung upside down: gravity swings each arm as its servo turns', '#777'],
         ['→ sensor values over serial to Max, where they shape the composition', '#bbb'],
         [`┄ ${ROBOT_FACTS.dormant}`, '#555'],
@@ -272,7 +272,7 @@ function robotSource(g: G, b: Box, v: DrawInput) {
     text(g, 'VISITORS', b.x, b.y, fontPx(10, s), '#fff');
     const bars = row({ x: b.x, y: b.y + fontPx(10, s) * 2, w: b.w, h: Math.min(b.h * 0.6, 180 * s) }, v.live.arms.length, 10 * s);
     v.live.arms.forEach((a, k) => {
-        const c = bars[k], fill = Math.max(0, Math.min(1, 1 - a.proximity / 3));
+        const c = bars[k], fill = Math.max(0, Math.min(1, 1 - a.cm / 100));
         frame(g, c, '#222');
         g.fillStyle = 'rgba(255,255,255,0.6)';
         g.fillRect(c.x + 2, c.y + c.h * (1 - fill), c.w - 4, c.h * fill);

@@ -254,10 +254,10 @@ function drawSolenoids(g: G, b: Box, v: DrawInput) {
 function drawRobot(g: G, b: Box, v: DrawInput) {
     const s = v.scale, live = v.live, { glyph, textBox } = cardParts(b, s, 4);
     hangingArms(g, glyph, live.arms, s);
-    const anyLive = live.arms.some(a => a.live);
+    const anyLive = live.arms.some(a => a.live.proximity || a.live.servo);
     lines(g, [
         [`VISITORS (proximity, touch) → ${ROBOT_FACTS.sensor} → ${ROBOT_FACTS.servo} 0–180°`, '#aaa'],
-        [`${live.arms.map(a => `${a.proximity.toFixed(1)} m${a.touch ? ' · touch' : ''}`).join(' · ')}`, '#777'],
+        [`${live.arms.map(a => `${Math.round(a.cm)} cm${a.touch ? ' · touch' : ''}`).join(' · ')}`, '#777'],
         ['→ serial → Max → sound', '#bbb'],
         [anyLive ? 'LIVE · from the audio computer' : ROBOT_FACTS.badge, anyLive ? '#fff' : '#555'],
     ], textBox, s);

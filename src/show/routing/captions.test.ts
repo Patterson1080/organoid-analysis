@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { firingCaption, pad6, sourceCaption } from './captions.ts';
+import { firingCaption, pad6, sourceCaption, strikeCaption } from './captions.ts';
 import { ATTRIBUTION } from './facts.ts';
 
 test('every detail source carries the attribution', () => {
@@ -21,4 +21,10 @@ test('the firing line says where its values come from', () => {
     assert.equal(firingCaption('blob', 131, 7), 'SetFrame → 131 intensities · 7 ≥ 0.1');
     assert.equal(firingCaption('spikes', 131, 0), 'spikes · no firing blob');
     assert.equal(firingCaption('mismatch', 64, 0), 'spikes · the firing blob is for another dataset');
+});
+
+test('strike captions say how sure they are', () => {
+    assert.deepEqual(strikeCaption('live', 'show', 3), ['LIVE · 3 strikes from the patch', '#fff']);
+    assert.equal(strikeCaption('computed', 'show', 4)[0], 'the rows Max sends (backboneSpikes.txt) · 4 strikes');
+    assert.equal(strikeCaption('computed', 'local', 5)[0], '≈ local playback skips rows · 5 strikes');
 });
