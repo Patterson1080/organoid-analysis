@@ -2,15 +2,19 @@
 // and a rail of all six media to step between them.
 
 import { firingCaption, pad6, sourceCaption } from '../../show/routing/captions';
-import { ATTRIBUTION, CARD_TITLES, LED_FACTS, MEDIA, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
+import { ATTRIBUTION, CARD_TITLES, LED_FACTS, MEDIA, ROBOT_FACTS, SOLENOID_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
 import type { MediumKey } from '../../show/routing/facts';
 import type { Box, DetailLayout } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
+import { expectedKicks } from '../../show/routing/maxPatch';
+import type { PatchData } from '../../show/routing/maxPatch';
 import { paperMappings } from '../../show/routing/soundFeatures';
+import { soundPanels } from '../../show/routing/soundLayout';
 import { printedLayers } from '../../show/routing/vessel';
 import { MONO, arrowHead, clipTo, fitSquare, frame, hangingArms, ledGrid, lines, neuronMap, rateLine, strikers, swarmPanel, text, vesselProfile, vesselTop } from './glyphs';
 import type { G } from './glyphs';
 import { firingCount, row } from './overview';
+import { activityStrip, grainsPerSecond, harmony, perSecond, rules, score, speakers } from './soundGlyphs';
 import type { DrawInput, SwarmKey } from './overview';
 
 const CLOSE_LABEL = '× ROUTING';
@@ -54,12 +58,12 @@ function header(g: G, l: DetailLayout, key: MediumKey) {
 }
 
 /** The organoid as this medium hears it, with the playhead under it. */
-function source(g: G, b: Box, v: DrawInput, only?: 'backbone') {
+function source(g: G, b: Box, v: DrawInput, only?: 'backbone', heardAs?: string) {
     const s = v.scale, px = fontPx(10, s);
     const map = { ...b, h: b.h - px * 6 };
     frame(g, fitSquare(map), '#1e1e1e');
     if (v.live.neurons.length) neuronMap(g, map, v.live.neurons, v.live.spikeGlow, s, only);
-    const heard = only ? `${v.live.backboneSlots.length} backbone neurons of ${v.live.neurons.length}` : `${v.live.neurons.length} neurons · spikes`;
+    const heard = heardAs ?? (only ? `${v.live.backboneSlots.length} backbone neurons of ${v.live.neurons.length}` : `${v.live.neurons.length} neurons · spikes`);
     lines(g, sourceCaption(v.phase, v.index, heard), { x: b.x, y: map.y + map.h + px * 0.6, w: b.w, h: px * 5.5 }, s, 10);
 }
 
@@ -130,7 +134,29 @@ function bar(g: G, b: Box, t: number, label: string, s: number) {
     g.fillRect(track.x, track.y, track.w * Math.min(1, Math.max(0, t)), track.h);
 }
 
+/** The patch at the playhead: the voices as they play, the rules that pace them, the chord, the speakers. */
+function soundFromPatch(g: G, l: DetailLayout, v: DrawInput, patch: PatchData) {
+    const s = l.scale, sv = v.live.sound, p = soundPanels(storyTop(l)), px = fontPx(9, s);
+    const playing = v.live.moving ? 'the last 10 s, drawn like Max draws them' : 'Max plays on at the last values';
+    text(g, `VOICES · ${playing}`, p.score.x, p.score.y, px, '#ddd');
+    const strip: Box = { x: p.score.x, y: p.score.y + px * 1.6, w: p.score.w, h: Math.max(8, p.score.h * 0.14) };
+    activityStrip(g, strip, patch, v.range, sv.heardIndex, s);
+    const below = strip.y + strip.h + 6 * s;
+    score(g, { ...p.score, y: below, h: Math.max(8, p.score.y + p.score.h - below) }, sv, v.now, s);
+    rules(g, p.rules, sv, s);
+    harmony(g, p.harmony, sv, v.index, v.mode, s);
+    speakers(g, p.output, sv, v.now, s);
+    chain(g, l.chain, [
+        [`/index ${v.index === null ? '——————' : pad6(v.index)}`, 'OSC → audio computer'],
+        ['peek~ activity · flags', `v ${sv.v.toFixed(3)} · flag ${sv.flagsSoFar}`],
+        ['a = v / 0.9668', sv.a.toFixed(3)],
+        ['tones · grains · kick', `${perSecond(sv.toneMs).toFixed(1)} · ${grainsPerSecond(sv).toFixed(0)} · ${(perSecond(sv.kickMs) * expectedKicks()).toFixed(2)} /s`],
+        ['speakers 3–6', 'arpeggio 1–2'],
+    ], s);
+}
+
 function sound(g: G, l: DetailLayout, v: DrawInput) {
+    if (v.live.sound.source === 'patch' && v.patch) return soundFromPatch(g, l, v, v.patch);
     const s = l.scale, st = storyTop(l), live = v.live;
     const graph: Box = { ...st, h: st.h * 0.34 };
     frame(g, graph, '#222');
@@ -150,6 +176,7 @@ function sound(g: G, l: DetailLayout, v: DrawInput) {
     g.save();
     clipTo(g, textBox);
     lines(g, [
+        [`link activitylevel.wav + burstflags.wav (dev/audio) into data/ for the patch's own values (${SOUND_FACTS.patchFile})`, '#bbb'],
         [`ranges: ${SOUND_FACTS.rangesSource} · rate normalized to this recording's peak (${live.peak}/100 ms)`, '#777'],
         [`${SOUND_FACTS.descriptionSource}: population firing rate → synthesis density and spatialization; burst endpoints → harmonic transitions`, '#999'],
         [`${SOUND_FACTS.harmony} · distorted electric guitar · ${SOUND_FACTS.channels} ch · a reverb per channel${sl.harmony !== undefined ? ` · harmonic step ${sl.harmony} (LIVE)` : ''}`, '#999'],
@@ -159,8 +186,8 @@ function sound(g: G, l: DetailLayout, v: DrawInput) {
     g.restore();
     chain(g, l.chain, [
         [`/index ${v.index === null ? '——————' : pad6(v.index)}`, 'OSC → audio computer'],
-        ['Max/MSP', 'reads the matrix'],
-        ['population rate', `${Math.round(live.rate)}/100 ms`],
+        ['Max/MSP', 'reads activity + flag WAVs'],
+        ['population rate ≈', `${Math.round(live.rate)}/100 ms`],
         ['burst ends', `${live.burst.ends} transitions`],
         [`${SOUND_FACTS.channels} ch`, SOUND_FACTS.harmony],
     ], s);
@@ -176,16 +203,17 @@ function solenoids(g: G, l: DetailLayout, v: DrawInput) {
     const log = live.strikeLog.slice().reverse().map(e => [`slot ${String(e.slot).padStart(2, '0')} · neuron ${e.neuronId} · t ${pad6(e.t)}`, '#999'] as [string, string]);
     lines(g, [
         ['one solenoid per backbone neuron, in the ceramic vessels and suspended glassware', '#bbb'],
-        [live.strikeSource === 'live' ? `LIVE · ${live.strikes} strikes from the patch` : `≈ computed from spikes · the patch is the authority · ${live.strikes} strikes`, live.strikeSource === 'live' ? '#fff' : '#555'],
+        [`Max sends line index + 1 of ${SOLENOID_FACTS.file} as <27 digits> to the ${SOLENOID_FACTS.board}; all off ${SOLENOID_FACTS.releaseMs} ms after the last line`, '#999'],
+        [live.strikeSource === 'live' ? `LIVE · ${live.strikes} strikes from the patch` : `≈ computed from the 27 backbone spike columns · ${live.strikes} strikes`, live.strikeSource === 'live' ? '#fff' : '#555'],
         ...log,
     ], logBox, s, 9);
     g.restore();
     chain(g, l.chain, [
         [`/index ${v.index === null ? '——————' : pad6(v.index)}`, 'OSC → audio computer'],
-        ['Max/MSP', 'reads the matrix'],
-        ['backbone spike', `${live.backboneSlots.length} of ${live.neurons.length}`],
+        [SOLENOID_FACTS.file, `line index + 1 · ${live.backboneSlots.length} of ${live.neurons.length}`],
+        ['<27 digits>', `${SOLENOID_FACTS.baud} baud`],
+        [SOLENOID_FACTS.board, `all off after ${SOLENOID_FACTS.releaseMs} ms`],
         ['strike', `${live.strikes} so far`],
-        ['vessel', 'ceramic · glass'],
     ], s);
 }
 
@@ -310,7 +338,10 @@ export function drawRail(g: G, l: DetailLayout, v: DrawInput, active: MediumKey)
         text(g, CARD_TITLES[key].title, t.x + 5 * s, t.y + 4 * s, px, key === active ? '#fff' : '#888');
         const gb: Box = { x: t.x + 5 * s, y: t.y + px * 1.8 + 4 * s, w: t.w - 10 * s, h: t.h - px * 1.8 - 9 * s };
         if (key === 'visual') swarmPanel(g, gb, v.swarms.physarum);
-        if (key === 'sound') rateLine(g, gb, live.rateHistory, live.rateHead, live.peak);
+        if (key === 'sound') {
+            if (live.sound.source === 'patch' && v.patch) activityStrip(g, gb, v.patch, v.range, live.sound.heardIndex, s);
+            else rateLine(g, gb, live.rateHistory, live.rateHead, live.peak);
+        }
         if (key === 'solenoids') strikers(g, gb, live.strikeGlow);
         if (key === 'led') ledGrid(g, gb, live.ledCells, live.ledColor, live.ledAgeMs > LED_FACTS.idleMs);
         if (key === 'robot') hangingArms(g, gb, live.arms, s * 0.6);
@@ -327,6 +358,7 @@ export function drawDetail(g: G, l: DetailLayout, key: MediumKey, v: DrawInput):
     g.save();
     clipTo(g, l.source);
     if (key === 'robot') robotSource(g, l.source, v);
+    else if (key === 'sound' && v.live.sound.source === 'patch') source(g, l.source, v, undefined, 'Max hears activitylevel.wav + burstflags.wav');
     else source(g, l.source, v, key === 'solenoids' ? 'backbone' : undefined);
     g.restore();
     g.save();

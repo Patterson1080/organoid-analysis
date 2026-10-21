@@ -8,10 +8,12 @@ import type { MediumKey, VisualOutput } from '../../show/routing/facts';
 import type { Box, RoutingLayout } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
 import type { LiveState } from '../../show/routing/live';
+import type { PatchData } from '../../show/routing/maxPatch';
 import { printedLayers } from '../../show/routing/vessel';
 import type { Vessel } from '../../show/routing/vessel';
 import { MONO, arrowHead, clipTo, frame, hangingArms, ledGrid, lines, neuronMap, overlaps, rateLine, strikers, swarmPanel, tag, text, vesselProfile, vesselTop } from './glyphs';
 import type { G } from './glyphs';
+import { activityStrip, chordName, chordStrip, grainsPerSecond, perSecond } from './soundGlyphs';
 
 export type SwarmKey = 'physarum' | 'boids' | 'termites';
 
@@ -20,6 +22,8 @@ export interface DrawInput {
     swarms: Record<SwarmKey, HTMLCanvasElement>;
     vessel: Vessel | null;
     vesselLayer: number;
+    patch: PatchData | null;
+    range: { start: number; end: number }; // the indices a pass covers
     index: number | null;
     mode: 'show' | 'local';
     phase: 'on' | 'off' | 'stopped';
@@ -194,10 +198,25 @@ function drawFab(g: G, b: Box, v: DrawInput) {
 }
 
 function drawSound(g: G, b: Box, v: DrawInput) {
-    const s = v.scale, live = v.live, { glyph, textBox } = cardParts(b, s, 3);
+    const s = v.scale, live = v.live, sv = live.sound, { glyph, textBox } = cardParts(b, s, 3);
+    if (sv.source === 'patch' && v.patch) {
+        // The pass's activity and flags over the chord strip; the chord, large, at the right.
+        const nameW = Math.min(glyph.w * 0.3, 74 * s), left: Box = { ...glyph, w: glyph.w - nameW - 8 * s };
+        activityStrip(g, { ...left, h: left.h * 0.6 }, v.patch, v.range, sv.heardIndex, s);
+        chordStrip(g, { ...left, y: left.y + left.h * 0.68, h: left.h * 0.32 }, sv.chordStep, s);
+        chordName(g, { x: left.x + left.w + 8 * s, y: glyph.y, w: nameW, h: glyph.h }, sv, s);
+        const kick = sv.kickMs ? `kick every ${(sv.kickMs / 1000).toFixed(1)} s` : 'kick —';
+        const telemetry = sv.chordSource === 'live' || live.rateSource === 'live';
+        lines(g, [
+            ['Max reads activity + burst flags at /index', '#bbb'],
+            [`tones ${perSecond(sv.toneMs).toFixed(1)}/s · grains ${grainsPerSecond(sv).toFixed(0)}/s · ${kick}`, '#888'],
+            [telemetry ? 'LIVE · from the patch' : `PATCH RULES${sv.chordSource === 'computed' ? ' · chord ≈' : ''}`, telemetry ? '#fff' : '#777'],
+        ], textBox, s);
+        return;
+    }
     rateLine(g, { ...glyph, y: glyph.y + glyph.h * 0.15, h: glyph.h * 0.7 }, live.rateHistory, live.rateHead, live.peak);
     lines(g, [
-        ['Max reads the matrix at /index', '#bbb'],
+        ['patch data not linked: ≈ from spikes', '#bbb'],
         [`rate ${Math.round(live.rate)}/100 ms · ${live.burst.inBurst ? 'BURST' : 'quiet'} · ends ${live.burst.ends}`, '#888'],
         [live.rateSource === 'live' ? 'LIVE · from the patch' : SOUND_FACTS.badge, live.rateSource === 'live' ? '#fff' : '#555'],
     ], textBox, s);
@@ -208,7 +227,7 @@ function drawSolenoids(g: G, b: Box, v: DrawInput) {
     strikers(g, glyph, live.strikeGlow);
     lines(g, [
         [`${live.backboneSlots.length} backbone of ${live.neurons.length || '—'}`, '#aaa'],
-        ['spike → strike', '#777'],
+        ['Max → Daisy Seed · <27 bits>', '#777'],
         [live.strikeSource === 'live' ? `LIVE · ${live.strikes} strikes` : `≈ computed · ${live.strikes} strikes`, live.strikeSource === 'live' ? '#fff' : '#555'],
     ], textBox, s);
 }
@@ -301,10 +320,10 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
         g.save();
         g.translate(corner[0], (loop[1][1] + corner[1]) / 2);
         g.rotate(-Math.PI / 2);
-        tag(g, 'sensors · serial', 0, 0, px, '#888');
+        tag(g, 'arm 1 → arpeggio', 0, 0, px, '#888');
         g.restore();
     } else {
-        tag(g, 'sensors · serial', (loop[1][0] + corner[0]) / 2, corner[1], px, '#888');
+        tag(g, 'arm 1 → arpeggio', (loop[1][0] + corner[0]) / 2, corner[1], px, '#888');
     }
     g.restore();
 }

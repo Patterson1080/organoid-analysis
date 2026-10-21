@@ -69,6 +69,10 @@ export const SOUND_FACTS = {
 /** src/show/ledFrame.ts and server/serial-bridge.js. */
 export const LED_FACTS = { trail: 5, burstOver: 5, perFrameCap: 10, baud: 115200, idleMs: 500 };
 
+/** solenoidSerialCommunication.maxpat: /index → line index + 1 of the file → `<27 digits>` to the
+ *  board; all zeros 32 ms after the last line. The file isn't on this machine, so strikes stay ≈. */
+export const SOLENOID_FACTS = { file: 'backboneSpikes.txt', board: 'Daisy Seed', baud: 9600, releaseMs: 32 };
+
 export const ROBOT_FACTS = {
     arms: 3,
     sensor: 'HC-SR04',

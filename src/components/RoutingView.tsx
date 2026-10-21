@@ -233,6 +233,7 @@ export function RoutingView(props: RoutingViewProps) {
                 swarms: canvases,
                 vessel,
                 patch,
+                range,
                 vesselLayer: vessel ? layerForIndex(vessel, parked ?? 0) : 0,
                 index,
                 mode,
