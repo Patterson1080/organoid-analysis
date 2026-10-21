@@ -302,7 +302,7 @@ The audio computer's Max patch handles the other three:
 - **Operator controls** (hidden in ⛶ PRESENT): show/hide, tour on/off, and **VISUAL OUT**, which picks what happens to Unity's output this show (direct, TouchDesigner projection mapping, or mapping plus StreamDiffusion). They're kept per browser.
 - **Presentation:** the routing view takes the rest of the screen below the timeline, in any shape. Landscape screens put the bridge-fed media left of the organoid and the audio computer right; portrait screens stack them above and below.
 
-**Telemetry from the audio computer** (not sent yet). The cards switch to **LIVE** when Max sends these to the show machine's OSC input (UDP 3333), and fall back after 2 s of silence. The bridge doesn't log them.
+**Telemetry** (optional). The cards switch to **LIVE** when these reach the show machine's OSC input (UDP 3333, any interface), and fall back after 2 s of silence. The bridge doesn't log them.
 
 | Address | Args |
 |---|---|
@@ -312,6 +312,10 @@ The audio computer's Max patch handles the other three:
 | `/routing/sound/tones` · `/grains` · `/kick` | float: events/s |
 | `/routing/solenoid` | slot 0–26 (the k-th backbone neuron in `neurons.csv` row order) [, velocity 0–1] |
 | `/routing/robot/<1-3>/proximity` (cm) · `/servo` (°) · `/touch` (0/1) | float |
+
+**Max side.**
+- **Exact chord:** in `SimulacraNaturae_4ch_realtime.maxpat`, connect `[counter 17]`'s left outlet to `[prepend /routing/sound/harmony]` → `[udpsend <show machine IP> 3333]`. Use `255.255.255.255 3333` where Max allows broadcast.
+- **Arms:** the modular arms (`dev/arms/modular`) already mirror arms 1–3 as `/routing/robot/<id>/…` to 3333. The CURRENTS sketch only prints serial lines to Max.
 
 ## Spout Output
 
