@@ -2,7 +2,7 @@
 // and a rail of all six media to step between them.
 
 import { ARM_RULES, servoTarget } from '../../show/routing/arms';
-import { firingCaption, indexLabel, pad6, robotCaption, sourceCaption, strikeCaption } from '../../show/routing/captions';
+import { firingCaption, indexLabel, pad6, passCaption, robotCaption, sourceCaption, strikeCaption } from '../../show/routing/captions';
 import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, MEDIA, ROBOT_FACTS, SOLENOID_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
 import type { MediumKey } from '../../show/routing/facts';
 import type { Box, DetailLayout } from '../../show/routing/layout';
@@ -14,7 +14,7 @@ import { paperMappings } from '../../show/routing/soundFeatures';
 import { soundCaptions, soundPanels } from '../../show/routing/soundLayout';
 import { SWARM_KEYS } from '../../show/routing/swarm';
 import { printedLayers } from '../../show/routing/vessel';
-import { LINE_H, MONO, arrowHead, clipTo, clippedLines, fitSquare, frame, ledGrid, lines, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
+import { LINE_H, MONO, arrowHead, clipTo, clippedLines, fitSquare, frame, ledGrid, lines, linesHeight, neuronMap, rateLine, strikers, swarmPanel, text, vesselTop } from './glyphs';
 import type { G } from './glyphs';
 import { armRuleChart, armsPanel } from './armGlyphs';
 import type { DrawInput } from './overview';
@@ -59,11 +59,12 @@ function header(g: G, l: DetailLayout, key: MediumKey) {
 /** The organoid as this medium hears it, with the playhead under it. */
 function source(g: G, b: Box, v: DrawInput, only?: 'backbone', heardAs?: string) {
     const s = v.scale, px = fontPx(10, s);
-    const map = { ...b, h: b.h - px * 6 };
+    const heard = heardAs ?? (only ? `${v.live.backboneSlots.length} backbone neurons of ${v.live.neurons.length}` : `${v.live.neurons.length} neurons · spikes`);
+    const caption = sourceCaption(v.phase, v.index, heard), captionH = linesHeight(g, caption, b.w, s, 10); // as wrapped: the attribution shows whole
+    const map = { ...b, h: Math.max(0, b.h - captionH - px * 0.6) };
     frame(g, fitSquare(map), '#1e1e1e');
     if (v.live.neurons.length) neuronMap(g, map, v.live.neurons, v.live.spikeGlow, s, only);
-    const heard = heardAs ?? (only ? `${v.live.backboneSlots.length} backbone neurons of ${v.live.neurons.length}` : `${v.live.neurons.length} neurons · spikes`);
-    lines(g, sourceCaption(v.phase, v.index, heard), { x: b.x, y: map.y + map.h + px * 0.6, w: b.w, h: px * 5.5 }, s, 10);
+    lines(g, caption, { x: b.x, y: map.y + map.h + px * 0.6, w: b.w, h: captionH }, s, 10);
 }
 
 /** The story area above the chain. */
@@ -102,13 +103,13 @@ function visual(g: G, l: DetailLayout, v: DrawInput) {
     const below: Box = { x: st.x, y: strip.y + strip.h + 6 * s, w: st.w, h: st.y + st.h - (strip.y + strip.h + 6 * s) };
     clippedLines(g, [
         [live.firingSource === 'blob' ? `spikes (cyan) vs the normalized rate EoC reads (bars) · line = ${VISUAL_FACTS.threshold}` : `${firingCaption(live.firingSource, live.neurons.length, 0)} (data/${VISUAL_FACTS.blob})`, '#999'],
-        ['pass  /sim_resetSimsOnly → /sim_on 5 → T ×5 · P ×10 → /sim_off 5 → 2 min dark, sims paused', '#777'],
+        [v.showConfig ? passCaption(v.showConfig) : 'pass  /sim_resetSimsOnly → /sim_on 5 → T ×5 · P ×10 → /sim_off 5 → 2 min dark, sims paused', '#777'],
         ['one pass = one day: the diurnal sun sweeps the temperature field once per /index pass', '#777'],
         [`out  ${VISUAL_OUTPUT_CHAINS[v.visualOutput].join(' → ')}`, '#bbb'],
         [VISUAL_FACTS.drawnNote, '#555'],
     ], below, s);
     chain(g, l.chain, [
-        [indexLabel(v.index), `OSC int · ${VISUAL_FACTS.fps}/s`],
+        [indexLabel(v.index), v.fps === null ? 'OSC int · one a frame' : `OSC int · ${v.fps}/s`],
         ['OSCMapping', `UDP :${VISUAL_FACTS.port}`],
         ['NeuronFiringSource', `${VISUAL_FACTS.blob} row`],
         [`≥ ${VISUAL_FACTS.threshold} = firing`, `${firingCount(live)} now · ${VISUAL_FACTS.fadeS} s fade`],
@@ -135,7 +136,7 @@ function soundFromPatch(g: G, l: DetailLayout, v: DrawInput, patch: PatchData) {
     const below = strip.y + strip.h + 6 * s;
     score(g, { ...p.score, y: below, h: Math.max(8, p.score.y + p.score.h - below) }, sv, v.now, s);
     rules(g, p.rules, sv, s);
-    harmony(g, p.harmony, sv, v.index, v.mode, s);
+    harmony(g, p.harmony, sv, v.index, v.mode, v.fps, s);
     speakers(g, p.output, sv, v.now, s);
     chain(g, l.chain, [
         [indexLabel(v.index), 'OSC → audio computer'],
@@ -164,7 +165,9 @@ function sound(g: G, l: DetailLayout, v: DrawInput) {
     bar(g, cols[3], span(SOUND_FACTS.kick, kick.perSec), `kick ${kick.perSec.toFixed(2)}/s · ${SOUND_FACTS.kickPitch}${kick.live ? ' · LIVE' : ''}`, s);
     const textBox: Box = { x: st.x, y: cols[0].y + cols[0].h + 10 * s, w: st.w, h: st.y + st.h - (cols[0].y + cols[0].h + 10 * s) };
     clippedLines(g, [
-        [`link activitylevel.wav + burstflags.wav (dev/audio) into data/ for the patch's own values (${SOUND_FACTS.patchFile})`, '#bbb'],
+        [v.patch // linked, but nothing to read at this index (none heard yet, or past the data)
+            ? `${live.sound.heardIndex === null ? 'no /index heard yet' : `no patch data at ${indexLabel(live.sound.heardIndex)}`}: ≈ from spikes until there is (${SOUND_FACTS.patchFile})`
+            : `link activitylevel.wav + burstflags.wav (dev/audio) into data/ for the patch's own values (${SOUND_FACTS.patchFile})`, '#bbb'],
         [`ranges: ${SOUND_FACTS.rangesSource} · rate normalized to this recording's peak (${live.peak}/100 ms)`, '#777'],
         [`${SOUND_FACTS.descriptionSource}: population firing rate → synthesis density and spatialization; burst endpoints → harmonic transitions`, '#999'],
         [`${SOUND_FACTS.harmony} · distorted electric guitar · ${SOUND_FACTS.channels} ch · a reverb per channel${sl.harmony !== undefined ? ` · harmonic step ${sl.harmony} (LIVE)` : ''}`, '#999'],
@@ -238,8 +241,9 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
     const below: Box = { x: side.x, y: chart.y + chart.h + px, w: side.w, h: side.y + side.h - (chart.y + chart.h + px) };
     clippedLines(g, [
         ...live.arms.map((a, k): [string, string] => {
-            const on = armIsLive(a);
-            return [`arm ${k + 1} · ${Math.round(a.cm)} cm → ${servoTarget(a.cm)}° · servo ${Math.round(a.servo)}° · ${a.motion.phase}${a.touch ? ' · touched' : ''} · ${on ? 'LIVE' : 'sim'}`, on ? '#fff' : '#999'];
+            // Each value says where it came from: the distance (and the target and phase it drives), and the servo.
+            const from = a.live.proximity === a.live.servo ? (a.live.proximity ? 'LIVE' : 'sim') : a.live.proximity ? 'cm LIVE · servo sim' : 'cm sim · servo LIVE';
+            return [`arm ${k + 1} · ${Math.round(a.cm)} cm → ${servoTarget(a.cm)}° · servo ${Math.round(a.servo)}° · ${a.motion.phase}${a.touch ? ' · touched' : ''} · ${from}`, armIsLive(a) ? '#fff' : '#999'];
         }),
         [`${ROBOT_FACTS.sketch}: ramps at 200°/s, settles 100 ms, then ignores the sensor for 2 s; serial to Max`, '#888'],
         [`${ROBOT_FACTS.rebuild}: the same rules, touch-lit fibres, OSC to Max (9100) and here (3333, arms 1–3)`, '#777'],

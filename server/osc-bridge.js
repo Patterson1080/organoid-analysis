@@ -142,11 +142,19 @@ function serveData(req, res) {
         return;
     }
     const route = DATA_ROUTES.get(req.url);
-    if (!route || !existsSync(route.path)) {
+    // One stat, in a try: a link re-pointed between a check and a stat would throw here, uncaught,
+    // and take the bridge (and the show's OSC and LEDs) down.
+    let size = null;
+    try {
+        if (route) size = statSync(route.path).size;
+    } catch {
+        // gone or unreadable: answered like a missing file
+    }
+    if (size === null) {
         res.writeHead(404).end();
         return;
     }
-    res.writeHead(200, { 'Content-Type': route.type, 'Content-Length': statSync(route.path).size });
+    res.writeHead(200, { 'Content-Type': route.type, 'Content-Length': size });
     // pipeline, not pipe: a read error (e.g. an unreadable symlink target) ends this
     // response instead of throwing and taking the show down with the bridge.
     pipeline(createReadStream(route.path), res, err => {

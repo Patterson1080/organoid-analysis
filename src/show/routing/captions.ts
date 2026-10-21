@@ -1,6 +1,8 @@
 // Visitor-facing lines that depend on state: the playhead, where the Visual card's values come
 // from, and the attribution every routing screen carries.
 
+import type { ShowConfig } from '../../types';
+import { cueLabel } from '../showMath.ts';
 import { ATTRIBUTION, ROBOT_FACTS, VISUAL_FACTS } from './facts.ts';
 
 export const pad6 = (v: number) => String(Math.floor(v)).padStart(6, '0');
@@ -30,4 +32,13 @@ export const robotCaption = (anyLive: boolean): [string, string] => (anyLive ? [
 export function firingCaption(source: 'blob' | 'spikes' | 'mismatch', neurons: number, firing: number): string {
     if (source === 'blob') return `SetFrame → ${neurons} intensities · ${firing} ≥ ${VISUAL_FACTS.threshold}`;
     return source === 'mismatch' ? 'spikes · the firing blob is for another dataset' : 'spikes · no firing blob';
+}
+
+const seconds = (s: number) => (s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`);
+
+/** One show pass as the bridge runs it, from its config (Off, Fade and the cue counts are the
+ *  operator's): the pass-start cue, the fade up, the spread resets, the fade out, the dark. */
+export function passCaption(c: ShowConfig): string {
+    const spread = c.spreadCues.filter(q => q.count > 0).map(q => `${cueLabel(q.address)} ×${q.count}`).join(' · ');
+    return `pass  ${c.passStartCue} → ${c.onAddress} ${c.fadeSeconds}${spread ? ` → ${spread}` : ''} → ${c.offAddress} ${c.fadeSeconds} → ${seconds(c.offSeconds)} dark, sims paused`;
 }

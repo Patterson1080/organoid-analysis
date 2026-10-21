@@ -285,7 +285,7 @@ The organoid sits in the centre, lit by its spikes on the playhead (the show's `
 | Card | Signal → medium | Source |
 |---|---|---|
 | Visual · EoC-biomes | `/index` over OSC :1234 selects a row of EoC's firing blob, the normalized rates. A neuron at ≥ 0.1 excites its agents in physarum (1M), boids (20k) and termites (131): speed and deposit. Firing termites stamp Dispersal, which the others flee. | the blob itself, when `data/organoid_firing.f16` is linked; else spikes (the card says so) |
-| LED | `ledStep` → `SERIAL_SYNC` → `F:x,y` / `C:x,y` (≤ 10 a frame, 115200) → two 16×16 matrices → fiber optics | exact: the frame the page computed last |
+| LED | `ledStep` → `SERIAL_SYNC` → `F:x,y` / `C:x,y` (≤ 10 a frame, 115200) → two 16×16 matrices → fiber optics | exact: every frame the page computes |
 | Fabrication | both central artifacts, made before the show, drawn as their print layers and turning, side by side at one scale as installed: the termite form (PLA, 4 printed segments, ≈ 70 cm, from the same 131 agents: 100³ lattice → point cloud → Poisson surface) beside the clay vessel (452 mm), grown to the layer at this point of the recording. The detail alternates the whole form with its segments under a print preview; a schematic shows the frame, LED matrices and fibres. | the mesh's slices (`data/termite_slices.bin`) and the real G-code (`data/vessel.gcode`), layer ≈ linear in the index |
 
 The audio computer's Max patch handles the other three:

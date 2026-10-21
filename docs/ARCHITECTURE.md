@@ -49,7 +49,7 @@ A depiction of where the signal goes, inside the SHOW panel; it only reads, and 
 
 ```
 SHOW_STATE / playbackTimeRef ─┐
-emitFrameOutputs → lastLedFrameRef ─┤
+emitFrameOutputs → ledFramesRef ─────┤
 OSC_MSG /routing/* → applyTelemetry ─┼─▶ RoutingView (30 fps rAF) ─ advanceLive ─▶ drawOverview | drawDetail
 data/organoid_firing.f16, vessel.gcode, ─┤          (src/show/routing/live.ts)   (src/components/routing/)
   activitylevel.wav + burstflags.wav,  ─┤
@@ -77,13 +77,14 @@ data/organoid_firing.f16, vessel.gcode, ─┤          (src/show/routing/live.t
 - `playhead.ts`: which clock to follow: the show's while it runs and the bridge is connected, else local playback.
 - `captions.ts`: state-dependent copy (the playhead line, where the firing comes from, the attribution under every detail source).
 - `live.ts`: per-frame state from the playhead.
-  - **Spikes:** a forward step up to 250 ms keeps all its spikes; a bigger or backwards jump keeps 30 ms.
+  - **Spikes:** a forward step up to 250 ms keeps all its spikes; a bigger or backwards jump keeps 30 ms; a step back of up to 30 ms (the show playhead re-anchoring, or falling back to the last index sent) replays nothing. A show pass slices nothing before its first index.
   - **Held playhead:** after 150 ms still, the playhead counts as stopped. The firing fades like EoC's 0.5 s and the `/index` dashes stop.
   - **Also held:** glows, strikes, the rate and burst state (fresh telemetry wins), the LED pixels as `DualLED_Currents.ino` draws `F:`/`C:`, the serial lines, and the arms.
   - **Sound view:** the patch at the last index Max heard; its values hold through pauses and OFF.
     - **Chord step:** LIVE `harmony` when fresh; else in the show, flags counted from pass 1 over the show's range; else unknown (local playback skips most indices).
     - **Arpeggio:** from arm 1's distance, LIVE or simulated.
-    - **Events:** the event sim steps only while `/index` flows; with the recording stopped nothing triggers (the room's behaviour).
+    - **Events:** the event sim steps only while `/index` flows; with the recording stopped nothing triggers and nothing is drawn as sounding (the room's behaviour). Drones whose cycle ended meanwhile pick up out of phase; echoes that came due meanwhile are dropped.
+    - **OFF:** in the show a null index is OFF, and the bridge sends `endIndex` last, so that's what Max holds (also for the vessel layer).
   - **Arms:** each runs `arms.ts` on its distance: the arm's own via `/routing/robot/<id>/proximity`, else a stand-in visitor. LIVE servo and touch override; touch fades the fibres in over 1 s; the drawn spine curls with the angle and lags toward the tip.
 
 **View:** `src/components/RoutingView.tsx` owns the canvas, the loop, the tour and the operator settings (`src/utils/routingSettings.ts`). The loop is paused when hidden or off-screen.
@@ -97,12 +98,13 @@ Drawing lives in `src/components/routing/`:
 
 **Inputs** come through ShowPanel:
 - the show snapshot, or `playbackTimeRef` when no show runs;
-- `lastLedFrameRef`: the frame `emitFrameOutputs` computed, sent or not; during the show the bridge runs the same `ledStep` on the same slices;
+- `ledFramesRef`: every frame `emitFrameOutputs` computes, sent or not, queued (at most 64) and drained each draw; a frame older than 100 ms is a backlog and isn't drawn. During the show the bridge runs the same `ledStep` on the same slices;
 - `routingTelemetryRef`: `OSC_MSG` for `/routing/*`, applied before `setLastOscMessage` so telemetry never re-renders App;
 - the firing blob, the vessel, the patch's two WAVs (as `PatchData`) and the termite slices, fetched once from the bridge's `data/` (`server/data-files.js`) when `/data/status` lists them;
-- the playhead's `pass` and `range`: the show's, or pass 1 over the whole recording.
+- the playhead's `pass`, `range`, `fps` and the bridge's show config: the show's, or pass 1 over the whole recording.
+- telemetry strikes older than 100 ms are a backlog (a new state, a hidden tab), and Max's report of a strike just computed here is that strike.
 
-**Sizing:** outside presentation the canvas is width × 9/16, at least 420 px. In presentation the raster stays at 160 px and the routing canvas takes `innerHeight` minus its top, at least 360 px.
+**Sizing:** outside presentation the canvas is width × 9/16, at least 420 px. In presentation the raster stays at 160 px and the routing canvas takes `innerHeight` minus its top and the padding below it, at least 360 px, refitted when the panel above it resizes.
 
 ## Tests
 

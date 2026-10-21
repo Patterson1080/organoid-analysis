@@ -18,8 +18,9 @@ import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
 import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
 import { spikesBetween } from './show/showMath';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledFrame';
-import type { LedFrame } from './show/ledFrame';
 import { parseFiringBlob } from './show/routing/firingBlob';
+import { queueLedFrame } from './show/routing/live';
+import type { StampedLedFrame } from './show/routing/live';
 import type { FiringBlob } from './show/routing/firingBlob';
 import { patchData } from './show/routing/maxPatch';
 import type { PatchData } from './show/routing/maxPatch';
@@ -153,9 +154,10 @@ function App() {
     // handleShowState callback; and the last show index whose spikes were emitted.
     const emitFrameOutputsRef = useRef<(spikesInFrame: SpikeEvent[], frameTime: number) => void>(() => {});
     const lastShowIndexRef = useRef<number | null>(null);
-    // The routing view's inputs: the last LED frame emitFrameOutputs computed (sent or not), the
-    // audio computer's /routing/* telemetry, and the optional data/ files it draws from.
-    const lastLedFrameRef = useRef<LedFrame | null>(null);
+    // The routing view's inputs: every LED frame emitFrameOutputs computes (sent or not), queued for
+    // it to drain at its own rate, the audio computer's /routing/* telemetry, and the optional data/
+    // files it draws from.
+    const ledFramesRef = useRef<StampedLedFrame[]>([]);
     const routingTelemetryRef = useRef(createTelemetry());
     const [firingBlob, setFiringBlob] = useState<FiringBlob | null>(null);
     const [vessel, setVessel] = useState<Vessel | null>(null);
@@ -779,7 +781,7 @@ function App() {
             neuronBoundsRef.current,
         );
         recentFiringNeuronsRef.current = trail;
-        if (frame) lastLedFrameRef.current = frame;
+        if (frame) queueLedFrame(ledFramesRef.current, frame, performance.now());
 
         // Play sound for spikes in this frame
         if (soundEnabled && spikesInFrame.length > 0) {
@@ -1456,7 +1458,7 @@ function App() {
                                 presentation={presentation}
                                 neurons={neurons}
                                 playbackTimeRef={playbackTimeRef}
-                                ledFrameRef={lastLedFrameRef}
+                                ledFramesRef={ledFramesRef}
                                 telemetryRef={routingTelemetryRef}
                                 firingBlob={firingBlob}
                                 vessel={vessel}

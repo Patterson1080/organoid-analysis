@@ -4,7 +4,7 @@
 
 import { ARM_RULES } from '../../show/routing/arms';
 import { pad6 } from '../../show/routing/captions';
-import { SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
+import { SOUND_FACTS } from '../../show/routing/facts';
 import type { Box } from '../../show/routing/layout';
 import { fontPx, row } from '../../show/routing/layout';
 import type { Rate, SoundView } from '../../show/routing/live';
@@ -130,7 +130,7 @@ export function score(g: G, b: Box, sv: SoundView, now: number, s: number): void
     text(g, 'C1/D♭1', b.x + 4 * s, kickBand.y + kickBand.h - px, px, '#555');
 
     for (const v of sv.sim.drones) {
-        const level = droneLevel(v, now);
+        const level = sv.playing ? droneLevel(v, now) : 0; // the room is silent while /index is still
         if (v.pc < 0 || level < 0.01) continue;
         g.fillStyle = `rgba(255,255,255,${0.06 + 0.3 * level})`;
         const h = Math.max(1, rowH * 0.5 * level);
@@ -211,13 +211,13 @@ export function rules(g: G, b: Box, sv: SoundView, s: number): void {
 
 
 /** The counter, the chord it's on, and the flags that move it. */
-export function harmony(g: G, b: Box, sv: SoundView, index: number | null, mode: 'show' | 'local', s: number): void {
+export function harmony(g: G, b: Box, sv: SoundView, index: number | null, mode: 'show' | 'local', fps: number | null, s: number): void {
     const px = fontPx(9, s);
     text(g, 'HARMONY · counter 17', b.x, b.y, px, '#ddd');
     const strip: Box = { x: b.x, y: b.y + px * 1.8, w: b.w, h: Math.min(b.h * 0.3, px * 3) };
     chordStrip(g, strip, sv.chordStep, s);
     const c = chordAt(sv.chordStep);
-    const ahead = sv.nextFlag !== null && index !== null ? (sv.nextFlag - index) / VISUAL_FACTS.fps : null;
+    const ahead = sv.nextFlag !== null && index !== null && fps ? (sv.nextFlag - index) / fps : null;
     const where = mode === 'show'
         ? `flag ${sv.flagsSoFar} / ${sv.passFlags} this pass${sv.nextFlag !== null ? ` · next ${pad6(sv.nextFlag)}${ahead !== null && ahead >= 0 ? ` in ≈ ${Math.round(ahead)} s` : ''}` : ''}`
         : `${sv.passFlags} flags a pass`;
@@ -247,7 +247,7 @@ export function speakers(g: G, b: Box, sv: SoundView, now: number, s: number): v
         if (e.kind === 'arp') arpGlow = Math.max(arpGlow, k);
         else if (e.position > 0) glow[e.position] = Math.max(glow[e.position], k);
     }
-    for (const v of sv.sim.drones) if (v.position > 0) glow[v.position] = Math.max(glow[v.position], droneLevel(v, now) * 0.35);
+    if (sv.playing) for (const v of sv.sim.drones) if (v.position > 0) glow[v.position] = Math.max(glow[v.position], droneLevel(v, now) * 0.35);
 
     text(g, 'OUTPUT · 16 positions → speakers 3–6', b.x, b.y, fontPx(9, s), '#ddd');
     const top = b.y + px * 2.2, rowH = Math.min((b.h - px * 6) / 3, 34 * s), spk = Math.min(rowH, 22 * s);

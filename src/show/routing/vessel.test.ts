@@ -72,3 +72,23 @@ test('printed cut-off', () => {
     assert.equal(printedLayers(v283, 0), 0);
     assert.equal(printedLayers(v283, 9999), 283);
 });
+
+test('layers count from where the toolpath starts: each is one whole turn, closed', () => {
+    // The exporter starts each turn half a layer up (Z0.8 for 1.6 mm): bins from z = 0 cut every turn in two.
+    const lines = ['; layerHeight=1.6', ';;; ======'];
+    for (let i = 0; i < 3 * 40; i++) {
+        const a = (i / 40) * 2 * Math.PI;
+        lines.push(`G1 X${(10 * Math.cos(a)).toFixed(3)} Y${(10 * Math.sin(a)).toFixed(3)} Z${(0.8 + (i / 40) * 1.6).toFixed(3)}`);
+    }
+    const v = parseVesselGcode(lines.join('\n'), 40);
+    assert.equal(v.layers.length, 3);
+    for (const { pts } of v.layers) {
+        const gap = Math.hypot(pts[pts.length - 2] - pts[0], pts[pts.length - 1] - pts[1]);
+        assert.ok(gap < 2, `a turn's ends ${gap.toFixed(1)} mm apart`); // one step of 40 around r 10 is 1.6 mm
+    }
+});
+
+test('a printed height on a layer boundary counts that layer', () => {
+    const v = parseVesselGcode(spiral(5, 40, 1.6, 10, 0, 0));
+    assert.equal(printedLayers(v, 4.8), 3); // 4.8 / 1.6 is 2.9999999999999996 in floating point
+});

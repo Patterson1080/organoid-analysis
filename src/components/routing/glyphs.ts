@@ -21,32 +21,45 @@ export function text(g: G, s: string, x: number, y: number, px: number, color: s
     g.fillText(s, x, y);
 }
 
-/** Rows of small text from the top of a box, each wrapped at spaces to the box width (the caller clips). */
-export function lines(g: G, rows: [string, string][], b: Box, scale: number, base = 9): void {
-    const px = fontPx(base, scale);
+/** The rows as lines() draws them: each wrapped at spaces to `w` in the font at `px`. */
+function wrapped(g: G, rows: [string, string][], w: number, px: number): [string, string][] {
     g.font = `${px}px ${MONO}`;
-    let y = b.y;
+    const out: [string, string][] = [];
     for (const [s, color] of rows) {
         const whole = s.replace(/^ +/, ''); // the wrap below drops leading spaces too
-        if (g.measureText(whole).width <= b.w) { // most rows fit: one measure, not one per word
-            text(g, whole, b.x, y, px, color);
-            y += px * LINE_H;
+        if (g.measureText(whole).width <= w) { // most rows fit: one measure, not one per word
+            out.push([whole, color]);
             continue;
         }
         let line = '';
         for (const word of s.split(' ')) {
             const next = line ? `${line} ${word}` : word;
-            if (line && g.measureText(next).width > b.w) {
-                text(g, line, b.x, y, px, color);
-                y += px * LINE_H;
+            if (line && g.measureText(next).width > w) {
+                out.push([line, color]);
                 line = word;
             } else {
                 line = next;
             }
         }
-        text(g, line, b.x, y, px, color);
+        out.push([line, color]);
+    }
+    return out;
+}
+
+/** Rows of small text from the top of a box, each wrapped at spaces to the box width (the caller clips). */
+export function lines(g: G, rows: [string, string][], b: Box, scale: number, base = 9): void {
+    const px = fontPx(base, scale);
+    let y = b.y;
+    for (const [s, color] of wrapped(g, rows, b.w, px)) {
+        text(g, s, b.x, y, px, color);
         y += px * LINE_H;
     }
+}
+
+/** The height lines() fills with these rows in a box `w` wide. */
+export function linesHeight(g: G, rows: [string, string][], w: number, scale: number, base = 9): number {
+    const px = fontPx(base, scale);
+    return wrapped(g, rows, w, px).length * px * LINE_H;
 }
 
 /** lines(), clipped to `clip` (the text box unless given). */

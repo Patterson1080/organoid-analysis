@@ -12,7 +12,7 @@ const neuron = (id: number, x: number, y: number, backbone: boolean): Neuron => 
 const neurons = [neuron(1, 0, 0, false), neuron(2, 0.5, 0.5, true), neuron(3, 1, 1, false)];
 const spikes: SpikeEvent[] = [{ timestamp_ms: 5, neuron_id: 3 }, { timestamp_ms: 10, neuron_id: 2 }, { timestamp_ms: 95, neuron_id: 1 }];
 const input = (over: Partial<LiveInput>): LiveInput => ({
-    index: null, spikes, blob: null, ledFrame: null, telemetry: null, dtMs: 16, now: 0,
+    index: null, spikes, blob: null, ledFrames: [], telemetry: null, dtMs: 16, now: 0,
     patch: null, mode: 'local', pass: 1, range: { start: 0, end: 179999 }, ...over,
 });
 
@@ -141,13 +141,13 @@ test('telemetry strikes at the same timestamp are each shown once', () => {
 
 test('an LED frame lights the matrix as DualLED_Currents draws it, and gives its serial lines', () => {
     const s = createLiveState(neurons, spikes);
-    advanceLive(s, input({ index: 10, ledFrame: { isBurst: false, firings: [{ x: 2, y: 3 }] } }));
+    advanceLive(s, input({ index: 10, ledFrames: [{ frame: { isBurst: false, firings: [{ x: 2, y: 3 }] }, at: 0 }] }));
     // F:x,y — the cell cyan at full life, a cyan halo at half life
     assert.deepEqual([s.ledColor[3 * 16 + 2], s.ledCells[3 * 16 + 2]], [LED_COLOR.cyan, 1]);
     assert.deepEqual([s.ledColor[3 * 16 + 3], s.ledCells[3 * 16 + 3]], [LED_COLOR.cyan, 0.5]);
     assert.deepEqual(s.ledLines, ['F:2,3']);
     // C:x,y — a disc of radius 3: red centre, purple to distance 2, blue to 3
-    advanceLive(s, input({ index: 11, ledFrame: { isBurst: true, firings: [{ x: 8, y: 8 }] } }));
+    advanceLive(s, input({ index: 11, ledFrames: [{ frame: { isBurst: true, firings: [{ x: 8, y: 8 }] }, at: 0 }] }));
     const at = (x: number, y: number) => [s.ledColor[y * 16 + x], s.ledCells[y * 16 + x]];
     assert.deepEqual(at(8, 8), [LED_COLOR.red, 1]);
     assert.deepEqual(at(9, 8), [LED_COLOR.purple, 1]);
@@ -155,7 +155,7 @@ test('an LED frame lights the matrix as DualLED_Currents draws it, and gives its
     assert.deepEqual(at(11, 8), [LED_COLOR.blue, 1]);
     assert.equal(s.ledCells[8 * 16 + 12], 0); // distance 4: untouched
     const burst = { isBurst: true, firings: Array.from({ length: 12 }, (_, i) => ({ x: i, y: 15 - i })) };
-    advanceLive(s, input({ index: 12, ledFrame: burst }));
+    advanceLive(s, input({ index: 12, ledFrames: [{ frame: burst, at: 0 }] }));
     assert.equal(s.ledLines.length, 10);
     assert.ok(s.ledLines.every(l => l.startsWith('C:')));
     assert.equal(s.ledFrames, 3);
@@ -296,4 +296,96 @@ test('a held playhead keeps the last activity, and nothing triggers', () => {
     assert.equal(s.sound.heardIndex, 1);
     assert.ok(Math.abs(s.sound.a - 0.45) < 1e-6);
     assert.equal(eventsSince(s.sound.sim, 200).length, 0);
+});
+
+test('a small step back replays nothing: the show playhead re-anchoring, or falling back to the index sent', () => {
+    const sp: SpikeEvent[] = [996, 998, 1000, 1002].map(t => ({ timestamp_ms: t, neuron_id: 2 })); // neuron 2: slot 0
+    const s = createLiveState(neurons, sp);
+    let now = 0;
+    for (const index of [996.9, 998.9, 1000.9, 1000.5, 1000, 1002.5]) advanceLive(s, input({ index, spikes: sp, mode: 'show', now: (now += 33) }));
+    assert.equal(s.strikes, 4); // each once: re-slicing each step back would count 10
+    assert.deepEqual(s.strikeLog.map(e => e.t), [996, 998, 1000, 1002]);
+    assert.equal(s.shownTo, 1002.5);
+});
+
+test('after the show stops, the held last index sent is still, and replays nothing', () => {
+    const sp: SpikeEvent[] = [{ timestamp_ms: 20590, neuron_id: 2 }];
+    const s = createLiveState(neurons, sp);
+    advanceLive(s, input({ index: 20600.72, spikes: sp, mode: 'show', now: 0 })); // the last show frame
+    const strikes = s.strikes;
+    for (let now = 33; now <= 660; now += 33) advanceLive(s, input({ index: 20600, spikes: sp, now })); // local: playbackTimeRef = s.index
+    assert.equal(s.strikes, strikes);
+    assert.equal(s.moving, false);
+});
+
+test("a show pass strikes nothing before its first index, whatever the playhead did before it", () => {
+    const sp: SpikeEvent[] = [{ timestamp_ms: 990, neuron_id: 2 }, { timestamp_ms: 1001, neuron_id: 2 }];
+    const range = { start: 1000, end: 179999 };
+    const s = createLiveState(neurons, sp);
+    advanceLive(s, input({ index: 1010, spikes: sp, now: 0 })); // local playback just ahead of the show's start
+    const before = s.strikes;
+    advanceLive(s, input({ index: 1001.5, spikes: sp, mode: 'show', pass: 1, range, now: 33 }));
+    assert.equal(s.strikes - before, 1);
+    assert.equal(s.strikeLog.at(-1)?.t, 1001);
+    const next = createLiveState(neurons, sp);
+    advanceLive(next, input({ index: 1000.5, spikes: sp, mode: 'show', pass: 2, range, now: 0 })); // a pass after OFF
+    assert.equal(next.strikes, 0); // 990 is the previous pass's tail, never sent in this one
+});
+
+test('every queued LED frame is drawn; a backlog older than a slow frame is not', () => {
+    const s = createLiveState(neurons, spikes);
+    const burst = { isBurst: true, firings: [{ x: 8, y: 8 }] }, trail = { isBurst: false, firings: [{ x: 2, y: 3 }] };
+    advanceLive(s, input({ index: 10, now: 1000, ledFrames: [{ frame: burst, at: 975 }, { frame: trail, at: 990 }] }));
+    assert.equal(s.ledFrames, 2);
+    assert.equal(s.ledColor[8 * 16 + 8], LED_COLOR.red); // the burst between two draws still lands
+    assert.deepEqual(s.ledLines, ['F:2,3']);
+    assert.equal(s.ledAgeMs, 10);
+    const stale = createLiveState(neurons, spikes); // e.g. a new dataset after the last frame was long sent
+    advanceLive(stale, input({ index: 10, now: 60_000, ledFrames: [{ frame: burst, at: 1000 }] }));
+    assert.equal(stale.ledFrames, 0);
+    assert.equal(stale.lastLedFrame, null);
+});
+
+test('buffered telemetry strikes are not replayed as new', () => {
+    const t = createTelemetry();
+    for (let i = 0; i < 64; i++) applyTelemetry(t, '/routing/solenoid', [i % 27], i * 500);
+    applyTelemetry(t, '/routing/solenoid', [5], 40_000);
+    const s = createLiveState(neurons, spikes); // a new state: the bridge autoload, a reload, an upload
+    advanceLive(s, input({ index: 10, telemetry: t, now: 40_010 }));
+    assert.equal(s.strikes, 1);
+    assert.deepEqual(s.strikeLog.map(e => e.slot), [5]);
+});
+
+test("Max's report of a strike just computed here counts once", () => {
+    const sp: SpikeEvent[] = [{ timestamp_ms: 100, neuron_id: 2 }];
+    const t = createTelemetry();
+    const s = createLiveState(neurons, sp);
+    advanceLive(s, input({ index: 100, spikes: sp, telemetry: t, now: 5000 })); // no fresh telemetry: computed
+    assert.equal(s.strikeSource, 'computed');
+    applyTelemetry(t, '/routing/solenoid', [0], 5020); // Max's own report of that strike, a moment later
+    advanceLive(s, input({ index: 102, spikes: sp, telemetry: t, now: 5033 }));
+    assert.equal(s.strikeSource, 'live');
+    assert.equal(s.strikes, 1);
+    applyTelemetry(t, '/routing/solenoid', [0], 5300); // the next one is new
+    advanceLive(s, input({ index: 120, spikes: sp, telemetry: t, now: 5310 }));
+    assert.equal(s.strikes, 2);
+});
+
+test("out-of-range arm telemetry is held to the sensor's and the servo's ranges", () => {
+    const s = createLiveState(neurons, spikes);
+    const t = createTelemetry();
+    applyTelemetry(t, '/routing/robot/1/proximity', [-1], 1000);
+    applyTelemetry(t, '/routing/robot/1/servo', [250], 1000);
+    applyTelemetry(t, '/routing/robot/2/proximity', [400], 1000);
+    advanceLive(s, input({ index: 1, telemetry: t, now: 1000 }));
+    assert.equal(s.arms[0].cm, 0);
+    assert.equal(s.arms[0].servo, 180);
+    assert.equal(s.arms[1].cm, 100);
+});
+
+test('a state begun in OFF holds the index the bridge sent last: the pass end', () => {
+    const s = createLiveState(neurons, spikes);
+    advanceLive(s, input({ index: null, patch: patch(), mode: 'show', range: { start: 0, end: 3 }, now: 1000 }));
+    assert.equal(s.sound.heardIndex, 3);
+    assert.equal(s.sound.source, 'patch');
 });

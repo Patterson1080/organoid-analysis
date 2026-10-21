@@ -90,3 +90,18 @@ test('without a chord, events still tick, unpitched', () => {
     assert.deepEqual(events.filter(e => e.kind === 'tone').map(e => e.pc), [-1, -1, -1, -1, -1]);
     assert.deepEqual(events.filter(e => e.kind === 'arp').map(e => e.pc), [-1, -1, -1]);
 });
+
+test('drones that ended while the sim was still pick up out of phase, not all together', () => {
+    const sim = createSoundSim(1, 0);
+    stepSoundSim(sim, base({ now: 60_000, dtMs: 33 })); // a first step long after creation (rAF time), or after OFF
+    assert.ok(new Set(sim.drones.map(v => v.start)).size === sim.drones.length, `starts ${sim.drones.map(v => v.start)}`);
+    assert.ok(sim.drones.every(v => v.start <= 60_000 && v.start + 3 * v.T + 1000 > 60_000));
+});
+
+test('an echo that came due while /index was still is not played afterwards', () => {
+    const sim = createSoundSim(1, 0);
+    sim.kickDelays[0] = 1100; // pending when the playhead stopped at 1000
+    stepSoundSim(sim, base({ now: 6000, dtMs: 33 })); // the first step after a 5 s pause
+    assert.equal(eventsSince(sim, -Infinity).filter(e => e.kind === 'kick').length, 0);
+    assert.deepEqual(sim.kickDelays, [null, null, null]);
+});

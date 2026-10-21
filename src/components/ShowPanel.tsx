@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Neuron, ShowConfig, ShowState, SpikeEvent } from '../types';
-import type { LedFrame } from '../show/ledFrame';
 import { cueLabel, cyclePosition, extrapolateIndex, formatClock, lowerBound, phaseRemainingMs, rateBins } from '../show/showMath';
 import type { FiringBlob } from '../show/routing/firingBlob';
+import type { StampedLedFrame } from '../show/routing/live';
 import type { PatchData } from '../show/routing/maxPatch';
 import type { Telemetry } from '../show/routing/telemetry';
 import type { TermiteSlices } from '../show/routing/termiteSlices';
@@ -26,7 +26,7 @@ interface ShowPanelProps {
     // The routing view below the timeline
     neurons: Neuron[];
     playbackTimeRef: React.MutableRefObject<number>;   // local playback, when no show runs
-    ledFrameRef: React.MutableRefObject<LedFrame | null>;
+    ledFramesRef: React.MutableRefObject<StampedLedFrame[]>;
     telemetryRef: React.MutableRefObject<Telemetry>;
     firingBlob: FiringBlob | null;
     vessel: Vessel | null;
@@ -78,7 +78,7 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
-export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false, neurons, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
+export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false, neurons, playbackTimeRef, ledFramesRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
@@ -303,7 +303,7 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
                 spikes={spikes}
                 showLatestRef={latestRef}
                 playbackTimeRef={playbackTimeRef}
-                ledFrameRef={ledFrameRef}
+                ledFramesRef={ledFramesRef}
                 telemetryRef={telemetryRef}
                 firingBlob={firingBlob}
                 vessel={vessel}

@@ -15,7 +15,7 @@ export const ARM_RULES = {
 } as const;
 
 /** Out-of-range distances clamp; an unreadable one counts as nobody there. */
-const readCm = (cm: number) => (Number.isFinite(cm) ? Math.min(ARM_RULES.rangeCm, Math.max(0, cm)) : ARM_RULES.rangeCm);
+export const readCm = (cm: number) => (Number.isFinite(cm) ? Math.min(ARM_RULES.rangeCm, Math.max(0, cm)) : ARM_RULES.rangeCm);
 
 /** Arduino's `map(d, 0, 100, 0, 180)`: the float distance truncates to a long, then integer math. */
 export function servoTarget(cm: number): number {

@@ -155,6 +155,7 @@ function stepKicks(sim: SoundSim, ticks: number[], now: number) {
 export function stepSoundSim(sim: SoundSim, input: SimInput): void {
     const { now, notes } = input;
     const dt = Math.min(input.dtMs, MAX_STEP_MS);
+    const from = now - dt; // whatever came due before this step did so while the sim was still
 
     const tones: number[] = [];
     sim.toneClock = metro(sim.toneClock, input.toneMs, dt, now, tones);
@@ -173,6 +174,8 @@ export function stepSoundSim(sim: SoundSim, input: SimInput): void {
 
     const kicks: number[] = [];
     sim.kickClock = metro(sim.kickClock, input.kickMs, dt, now, kicks);
+    // An echo that came due while /index was still went into the room's silence: it's gone.
+    for (let k = 0; k < ECHO_STAGES; k++) if ((sim.kickDelays[k] ?? Infinity) < from) sim.kickDelays[k] = null;
     stepKicks(sim, kicks, now);
 
     const arps: number[] = [];
@@ -184,8 +187,13 @@ export function stepSoundSim(sim: SoundSim, input: SimInput): void {
     }
 
     for (const v of sim.drones) {
-        if (now >= v.start + 3 * v.T + DRONE_GAP_MS) newDroneCycle(sim, v, now, notes);
-        else if (v.pc < 0 && notes) v.pc = pickPc(sim, notes);
+        const end = v.start + 3 * v.T + DRONE_GAP_MS;
+        if (now >= end) {
+            newDroneCycle(sim, v, now, notes);
+            // It ended while the sim was still (a new view, OFF, a pause): it picks up out of phase,
+            // as Max's free-running voices are, instead of all six restarting together.
+            if (end < from) v.start = now - rand(sim) * (3 * v.T + DRONE_GAP_MS);
+        } else if (v.pc < 0 && notes) v.pc = pickPc(sim, notes);
     }
 }
 

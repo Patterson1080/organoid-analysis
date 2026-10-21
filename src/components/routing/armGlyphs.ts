@@ -106,7 +106,7 @@ export function armsPanel(g: G, b: Box, arms: Arm[], s: number, opts: { cone: bo
         const x = b.x + (k + 0.38) * (b.w / arms.length); // a little left of centre: the arms curl right
         drawArm(g, x, b.y + 4 * s, len, cone, arm, s, opts.labels);
         if (!opts.labels) return;
-        const tag = armIsLive(arm) ? 'LIVE' : 'sim';
+        const tag = arm.live.proximity ? 'LIVE' : 'sim'; // the distance's own source
         text(g, `arm ${k + 1} · ${armPhaseText(arm)}`, x, b.y + b.h - foot, px, '#ccc', 'center');
         text(g, `${Math.round(arm.cm)} cm · ${tag}`, x, b.y + b.h - foot + px * 1.3, px, arm.live.proximity ? '#fff' : '#777', 'center');
     });
@@ -126,8 +126,9 @@ export function armRuleChart(g: G, b: Box, arms: Arm[], s: number): void {
     g.stroke();
     arms.forEach((arm, k) => {
         const x = X(Math.min(ARM_RULES.rangeCm, arm.cm));
-        g.fillStyle = 'rgba(255,255,255,0.08)'; // the deadband the arm sits in
-        g.fillRect(plot.x, Y(Math.min(ARM_RULES.servoMax, arm.servo + ARM_RULES.deadbandDeg)), plot.w, (2 * ARM_RULES.deadbandDeg / ARM_RULES.servoMax) * plot.h);
+        const hi = Math.min(ARM_RULES.servoMax, arm.servo + ARM_RULES.deadbandDeg), lo = Math.max(0, arm.servo - ARM_RULES.deadbandDeg);
+        g.fillStyle = 'rgba(255,255,255,0.08)'; // the deadband the arm sits in, clipped to the servo's range
+        g.fillRect(plot.x, Y(hi), plot.w, Y(lo) - Y(hi));
         g.fillStyle = armIsLive(arm) ? '#fff' : '#bbb';
         g.beginPath();
         g.arc(x, Y(arm.servo), 3.5 * s, 0, Math.PI * 2);

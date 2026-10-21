@@ -30,7 +30,6 @@ export const BACKBONE_COUNT = 27;
 /** Scene_BraveNewWork.unity and its 11.3 *Params.asset files. */
 export const VISUAL_FACTS = {
     port: 1234,
-    fps: 60,
     blob: 'organoid_firing.f16',
     threshold: 0.1,
     fadeS: 0.5,

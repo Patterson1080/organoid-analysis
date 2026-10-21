@@ -1,6 +1,7 @@
 // The routing overview: the organoid in the centre, the media the bridge feeds on one side,
 // the audio computer's group on the other, and the spokes between them.
 
+import type { ShowConfig } from '../../types';
 import { formatClock } from '../../show/showMath';
 import { firingCaption, indexLabel, robotCaption, strikeCaption } from '../../show/routing/captions';
 import { ATTRIBUTION, CARD_TITLES, FAB_FACTS, LED_FACTS, SOUND_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
@@ -33,6 +34,8 @@ export interface DrawInput {
     artifacts: ArtifactCache;
     index: number | null;
     mode: 'show' | 'local';
+    fps: number | null; // the show's /index rate (its config); null in local playback
+    showConfig: ShowConfig | null; // the bridge's show config, when it has said
     phase: 'on' | 'off' | 'stopped';
     offRemainingMs: number;
     dim: number;
@@ -86,10 +89,10 @@ function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offli
     const a = Math.atan2(ay - cy, ax - cx);
     const sx = cx + Math.cos(a) * (r + 3), sy = cy + Math.sin(a) * (r + 3);
     g.lineWidth = 1;
+    g.lineDashOffset = kind === 'stream' && flowing ? -now / DASH_FLOW_MS : 0; // only a flowing /index moves
     if (kind === 'stream') {
         g.strokeStyle = '#9a9a9a';
         g.setLineDash([2, 5]);
-        g.lineDashOffset = flowing ? -now / DASH_FLOW_MS : 0;
     } else {
         g.strokeStyle = kind === 'offline' ? '#333' : '#3a3a3a';
         g.setLineDash(kind === 'offline' ? [1, 4] : []);
@@ -149,9 +152,14 @@ function drawCentre(g: G, l: RoutingLayout, v: DrawInput) {
         text(g, indexLabel(v.index), cx, y, fontPx(13, s), '#fff', 'center');
     }
     y += fontPx(13, s) * 1.35;
-    text(g, v.mode === 'show' ? `show clock · ${VISUAL_FACTS.fps}/s` : 'local playback', cx, y, fontPx(8, s), '#777', 'center');
+    text(g, v.mode === 'show' ? `show clock · ${v.fps}/s` : 'local playback', cx, y, fontPx(8, s), '#777', 'center');
     y += fontPx(8, s) * 1.5;
-    text(g, ATTRIBUTION, cx, y, fontPx(8, s), '#5a5a5a', 'center');
+    // The attribution shows whole: on two lines when the circle is narrower than it (the cards drawn
+    // after it would cover its ends).
+    const apx = fontPx(8, s), cut = ATTRIBUTION.lastIndexOf(' · ');
+    g.font = `${apx}px ${MONO}`;
+    const parts = g.measureText(ATTRIBUTION).width <= 2 * r || cut < 0 ? [ATTRIBUTION] : [ATTRIBUTION.slice(0, cut), ATTRIBUTION.slice(cut + 3)];
+    parts.forEach((part, i) => text(g, part, cx, y + i * apx * LINE_H, apx, '#5a5a5a', 'center'));
 }
 
 function drawVisual(g: G, b: Box, v: DrawInput) {
@@ -218,7 +226,7 @@ function drawSound(g: G, b: Box, v: DrawInput) {
     }
     rateLine(g, { ...glyph, y: glyph.y + glyph.h * 0.15, h: glyph.h * 0.7 }, live.rateHistory, live.rateHead, live.peak);
     lines(g, [
-        ['patch data not linked: ≈ from spikes', '#bbb'],
+        [v.patch ? 'no patch data at this /index: ≈ from spikes' : 'patch data not linked: ≈ from spikes', '#bbb'],
         [`rate ${Math.round(live.rate)}/100 ms · ${live.burst.inBurst ? 'BURST' : 'quiet'} · ends ${live.burst.ends}`, '#888'],
         [live.rateSource === 'live' ? 'LIVE · from the patch' : SOUND_FACTS.badge, live.rateSource === 'live' ? '#fff' : '#555'],
     ], textBox, s);
@@ -284,11 +292,12 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
         : [[rb.x + rb.w * 0.5, rb.y + rb.h], [rb.x + rb.w * 0.5, audioFrame.y + audioFrame.h + margin], [so.x + so.w * 0.5, audioFrame.y + audioFrame.h + margin], [so.x + so.w * 0.5, so.y + so.h]];
     g.strokeStyle = '#bdbdbd';
     g.setLineDash([4 * s, 4 * s]);
-    g.lineDashOffset = v.now / 30;
+    g.lineDashOffset = -v.now / 30; // flowing from the robot into Max, as the arrow points
     g.beginPath();
     loop.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
     g.stroke();
     g.setLineDash([]);
+    g.lineDashOffset = 0;
 
     drawCentre(g, l, v);
 

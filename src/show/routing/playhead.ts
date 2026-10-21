@@ -1,7 +1,7 @@
 // Which clock the routing view follows: the show's while it runs and the bridge is there to send
 // it; otherwise local playback, which sends /index, LEDs and sound itself.
 
-import type { ShowState } from '../../types';
+import type { ShowConfig, ShowState } from '../../types';
 import { extrapolateIndex, phaseRemainingMs } from '../showMath.ts';
 
 export interface Playhead {
@@ -11,6 +11,8 @@ export interface Playhead {
     offRemainingMs: number;
     pass: number; // the show's pass; local playback counts as pass 1
     range: { start: number; end: number }; // the indices a pass covers
+    fps: number | null; // the show's /index rate (its config); null in local playback, which sends one a frame
+    config: ShowConfig | null; // the bridge's show config, when it has said
 }
 
 const RECORDING = { start: 0, end: 179999 };
@@ -28,8 +30,8 @@ export function routingPlayhead(
         const phase = st.phase === 'off' ? 'off' : 'on';
         return {
             index: extrapolateIndex(st, since), phase, mode: 'show', offRemainingMs: phase === 'off' ? phaseRemainingMs(st, since) : 0,
-            pass: st.pass, range: { start: st.config.startIndex, end: st.config.endIndex },
+            pass: st.pass, range: { start: st.config.startIndex, end: st.config.endIndex }, fps: st.config.fps, config: st.config,
         };
     }
-    return { index: hasData ? localTime : null, phase: 'stopped', mode: 'local', offRemainingMs: 0, pass: 1, range: { ...RECORDING } };
+    return { index: hasData ? localTime : null, phase: 'stopped', mode: 'local', offRemainingMs: 0, pass: 1, range: { ...RECORDING }, fps: null, config: st?.config ?? null };
 }

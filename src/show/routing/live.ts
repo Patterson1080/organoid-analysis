@@ -5,7 +5,7 @@
 
 import type { Neuron, SpikeEvent } from '../../types';
 import { neuronBounds } from '../ledFrame.ts';
-import { ARM_RULES, createArmMotion, stepArmMotion, visitorCm } from './arms.ts';
+import { ARM_RULES, createArmMotion, readCm, stepArmMotion, visitorCm } from './arms.ts';
 import type { ArmMotion } from './arms.ts';
 import type { LedFrame } from '../ledFrame.ts';
 import { spikesBetween } from '../showMath.ts';
@@ -35,7 +35,7 @@ export interface LiveInput {
     index: number | null; // the playhead, null while nothing plays (OFF)
     spikes: SpikeEvent[]; // sorted by timestamp_ms
     blob: FiringBlob | null;
-    ledFrame: LedFrame | null; // the last frame emitFrameOutputs computed
+    ledFrames: StampedLedFrame[]; // every frame emitFrameOutputs computed since the last advance
     telemetry: Telemetry | null;
     dtMs: number;
     now: number;
@@ -65,7 +65,23 @@ export interface SoundView {
     arm1: { cm: number; live: boolean }; // arm 1 paces the arpeggio; simulated when it doesn't report here
     arpMs: number | null;
     rates: { tones: Rate; grains: Rate; kick: Rate }; // what the view prints: Max's own when it reports them
+    playing: boolean; // /index flows: the room hears the voices
     sim: SoundSim;
+}
+
+/** An LED frame as emitFrameOutputs computed it, and when (performance.now()). */
+export interface StampedLedFrame {
+    frame: LedFrame;
+    at: number;
+}
+
+const LED_QUEUE = 64;
+
+/** Queue a computed frame for the view, which drains them all at its own frame rate; the oldest
+ *  go once the view stops draining (hidden, offscreen). */
+export function queueLedFrame(queue: StampedLedFrame[], frame: LedFrame, at: number): void {
+    queue.push({ frame, at });
+    if (queue.length > LED_QUEUE) queue.splice(0, queue.length - LED_QUEUE);
 }
 
 export interface Rate {
@@ -98,7 +114,9 @@ export interface LiveState {
     idToIdx: Map<number, number>;
     slotOf: Int16Array; // neuron index → solenoid slot, or −1
     backboneSlots: number[]; // slot → neuron index
-    lastIndex: number | null;
+    lastIndex: number | null; // the playhead last frame: whether it moves
+    shownTo: number | null; // the furthest index whose spikes are shown: where the next slice starts
+    sliceKey: string; // the show pass (or local playback) the slicing follows
     movedAt: number; // when the playhead last changed
     moving: boolean; // the index is advancing: something is being sent
     fired: number[]; // neuron indices that spiked in the last advance
@@ -110,6 +128,7 @@ export interface LiveState {
     strikes: number;
     strikeSource: 'computed' | 'live';
     telemetryStrikeSeq: number; // newest telemetry strike already shown
+    computedAt: Float64Array; // per slot: when a strike was last computed here, to spot Max's report of it
     rate: number;
     peak: number;
     burst: BurstState;
@@ -131,7 +150,7 @@ export interface LiveState {
 const SPIKE_TAU_MS = 350;
 const STRIKE_TAU_MS = 180;
 const LED_TAU_MS = 260;
-const MAX_DT_MS = 100; // a long gap (hidden tab) decays like one slow frame
+const MAX_DT_MS = 100; // a long gap (hidden tab) decays like one slow frame; older events are a backlog
 const FRAME_SPAN_MS = 250; // a forward step up to this is one frame: keep all its spikes
 const JUMP_SPAN_MS = 30; // after a bigger or backwards jump, only this much (no backlog burst)
 const STALE_MS = 150; // a playhead that hasn't moved for this long has stopped
@@ -161,9 +180,10 @@ export function createLiveState(neurons: Neuron[], spikes: SpikeEvent[]): LiveSt
     });
     return {
         neurons: live, idToIdx, slotOf, backboneSlots,
-        lastIndex: null, movedAt: -Infinity, moving: false, fired: [],
+        lastIndex: null, shownTo: null, sliceKey: 'local', movedAt: -Infinity, moving: false, fired: [],
         spikeGlow: new Float32Array(live.length), firing: new Float32Array(live.length), firingSource: 'spikes',
         strikeGlow: new Float32Array(BACKBONE_COUNT), strikeLog: [], strikes: 0, strikeSource: 'computed', telemetryStrikeSeq: 0,
+        computedAt: new Float64Array(BACKBONE_COUNT).fill(-Infinity),
         rate: 0, peak: peakRate(spikes), burst: { inBurst: false, ends: 0 },
         rateHistory: new Float32Array(HISTORY), rateHead: 0, rateClock: 0, rateSource: 'computed', soundLive: {},
         ledCells: new Float32Array(256), ledColor: new Uint8Array(256), ledLines: [], lastLedFrame: null, ledFrames: 0, ledAgeMs: 0,
@@ -176,7 +196,7 @@ export function createLiveState(neurons: Neuron[], spikes: SpikeEvent[]): LiveSt
             grainTickMs: null, grainLen: null, grainChance: 0, passFlags: 0, flagsSoFar: 0, nextFlag: null,
             chordStep: null, chordSource: 'unknown', arm1: { cm: ARM_RULES.rangeCm, live: false }, arpMs: null,
             rates: { tones: { perSec: 0, live: false }, grains: { perSec: 0, live: false }, kick: { perSec: 0, live: false } },
-            sim: createSoundSim(1),
+            playing: false, sim: createSoundSim(1),
         },
     };
 }
@@ -192,9 +212,14 @@ function logStrike(s: LiveState, slot: number, t: number) {
     if (s.strikeLog.length > STRIKE_LOG) s.strikeLog.splice(0, s.strikeLog.length - STRIKE_LOG);
 }
 
-/** Where this frame's spikes start: the last index for a normal forward step, else just before a jump. */
-function sliceAfter(last: number | null, index: number): number {
-    return last !== null && index >= last && index - last <= FRAME_SPAN_MS ? last : index - JUMP_SPAN_MS;
+/** Where this frame's spikes start: the last index for a normal forward step, else just before a
+ *  jump, never before the pass's first index (Max gets none before it). null for a step back of up
+ *  to JUMP_SPAN_MS: the fractional show playhead re-anchoring on a SHOW_STATE, or falling back to
+ *  the last index sent, replays nothing; those spikes were shown already. */
+function sliceAfter(last: number | null, index: number, passStart: number): number | null {
+    if (last !== null && index < last && last - index <= JUMP_SPAN_MS) return null;
+    const after = last !== null && index >= last && index - last <= FRAME_SPAN_MS ? last : index - JUMP_SPAN_MS;
+    return Math.max(after, passStart - 1);
 }
 
 /** Neurons at or above the Visual threshold now. */
@@ -207,6 +232,12 @@ export function firingCount(s: LiveState): number {
 export function advanceLive(s: LiveState, input: LiveInput): void {
     const { index, telemetry, now } = input;
     const dt = Math.min(input.dtMs, MAX_DT_MS);
+    // A show pass starts its own slicing at its first row, whatever the playhead did before it.
+    const sliceKey = input.mode === 'show' ? `${input.pass}:${input.range.start}` : 'local';
+    if (sliceKey !== s.sliceKey) {
+        if (input.mode === 'show') s.shownTo = null;
+        s.sliceKey = sliceKey;
+    }
     decay(s.spikeGlow, dt, SPIKE_TAU_MS);
     decay(s.strikeGlow, dt, STRIKE_TAU_MS);
     decay(s.ledCells, dt, LED_TAU_MS);
@@ -219,7 +250,9 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
     s.strikeSource = liveStrikes ? 'live' : 'computed';
 
     s.fired = [];
-    const slice = index === null ? [] : spikesBetween(input.spikes, sliceAfter(s.lastIndex, index), index);
+    const after = index === null ? null : sliceAfter(s.shownTo, index, input.range.start);
+    const slice = index === null || after === null ? [] : spikesBetween(input.spikes, after, index);
+    if (index === null || after !== null) s.shownTo = index; // a small step back keeps the furthest index shown
     s.lastIndex = index;
     for (const spike of slice) {
         const i = s.idToIdx.get(spike.neuron_id);
@@ -229,13 +262,20 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
         const slot = s.slotOf[i];
         if (!liveStrikes && slot >= 0) {
             s.strikeGlow[slot] = 1;
+            s.computedAt[slot] = now;
             logStrike(s, slot, spike.timestamp_ms);
         }
     }
     if (telemetry && telemetry.strikes.length > 0) {
         if (liveStrikes) {
             for (const st of telemetry.strikes) {
-                if (st.seq <= s.telemetryStrikeSeq) continue;
+                // Strikes older than a slow frame are a backlog (a new state, a hidden tab), not news.
+                if (st.seq <= s.telemetryStrikeSeq || now - st.at > MAX_DT_MS) continue;
+                // Max reporting a strike just computed here (as its telemetry came back) is that strike.
+                if (now - s.computedAt[st.slot] <= MAX_DT_MS) {
+                    s.computedAt[st.slot] = -Infinity;
+                    continue;
+                }
                 s.strikeGlow[st.slot] = Math.min(1, st.velocity);
                 logStrike(s, st.slot, index ?? 0);
             }
@@ -280,7 +320,7 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
     }
 
     s.ledAgeMs += dt;
-    if (input.ledFrame && input.ledFrame !== s.lastLedFrame) applyLedFrame(s, input.ledFrame);
+    for (const { frame, at } of input.ledFrames) if (now - at <= MAX_DT_MS) applyLedFrame(s, frame, now - at);
 
     stepArms(s, telemetry, now, dt);
     stepSound(s.sound, s.soundLive, s.arms[0], s.moving, input, dt);
@@ -292,6 +332,9 @@ export function advanceLive(s: LiveState, input: LiveInput): void {
 function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, moving: boolean, input: LiveInput, dt: number) {
     const { patch, now, range } = input;
     if (input.index !== null) sv.heardIndex = input.index;
+    // In the show a null index is OFF, and the bridge always sends endIndex before /sim_off: what Max
+    // holds when this state began in OFF (a reload, a new dataset) is that.
+    else if (sv.heardIndex === null && input.mode === 'show') sv.heardIndex = range.end;
     const v = patch && sv.heardIndex !== null ? activityAt(patch, sv.heardIndex) : null;
     const i = Math.floor(sv.heardIndex ?? 0);
     if (patch && v !== null) {
@@ -339,6 +382,7 @@ function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, 
     sv.arm1 = { cm: arm1.cm, live: arm1.live.proximity };
     sv.arpMs = arpIntervalMs(arm1.cm);
 
+    sv.playing = moving;
     if (!moving) return;
     stepSoundSim(sv.sim, {
         now, dtMs: dt, notes: chordAt(sv.chordStep)?.notes ?? null,
@@ -349,7 +393,7 @@ function stepSound(sv: SoundView, soundLive: LiveState['soundLive'], arm1: Arm, 
 /** The frame as DualLED_Currents.ino draws it: at most perFrameCap commands; F:x,y is a cyan
  *  pixel with a half-life cyan halo, C:x,y a disc of radius 3 (red centre, purple to distance 2,
  *  blue to 3). A pixel keeps its longer life and takes the newest color, as the sketch's setFire. */
-function applyLedFrame(s: LiveState, frame: LedFrame) {
+function applyLedFrame(s: LiveState, frame: LedFrame, ageMs: number) {
     const cells = frame.firings.slice(0, LED_FACTS.perFrameCap).map(f => ({ x: Math.floor(f.x), y: Math.floor(f.y) }));
     const fire = (x: number, y: number, color: number, life: number) => {
         if (x < 0 || x > 15 || y < 0 || y > 15) return;
@@ -371,7 +415,7 @@ function applyLedFrame(s: LiveState, frame: LedFrame) {
     s.ledLines = cells.map(({ x, y }) => `${frame.isBurst ? 'C' : 'F'}:${x},${y}`);
     s.lastLedFrame = frame;
     s.ledFrames++;
-    s.ledAgeMs = 0;
+    s.ledAgeMs = Math.max(0, ageMs);
 }
 
 // The tendon curls the spine toward its side as the servo turns: these are the three drawn
@@ -391,8 +435,9 @@ function stepArms(s: LiveState, telemetry: Telemetry | null, now: number, dt: nu
         const touchValue = freshValue(t?.touch, now), touch = touchValue === null ? null : touchValue >= 0.5;
         arm.live = { proximity: cm !== null, servo: servo !== null, touch: touch !== null };
         stepArmMotion(arm.motion, cm ?? visitorCm(k, now), dt);
-        arm.cm = cm ?? arm.motion.cm;
-        arm.servo = servo ?? arm.motion.pos;
+        // Telemetry is any float: held to the sensor's and the servo's ranges, as the firmware's are.
+        arm.cm = cm === null ? arm.motion.cm : readCm(cm);
+        arm.servo = servo === null ? arm.motion.pos : Math.min(ARM_RULES.servoMax, Math.max(0, servo));
         arm.touch = touch ?? false;
         arm.light = Math.min(1, Math.max(0, arm.light + (arm.touch ? 1 : -1) * (dt / FIBRE_FADE_MS)));
         const pull = Math.min(1, Math.max(0, arm.servo / ARM_RULES.servoMax));

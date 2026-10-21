@@ -118,7 +118,9 @@ export function cachedDraw(g: G, cache: ArtifactCache, key: string, b: Box, now:
         }
         const cg = e.canvas.getContext('2d');
         if (!cg) return;
-        cg.setTransform(dpr, 0, 0, dpr, 0, 0);
+        // The box onto the whole (rounded-up) backing store, so the clear reaches its last pixels and the
+        // blit below is 1:1; at dpr scale a fractional edge column would never clear and strokes would pile up.
+        cg.setTransform(w / b.w, 0, 0, h / b.h, 0, 0);
         cg.clearRect(0, 0, b.w, b.h);
         render(cg, { x: 0, y: 0, w: b.w, h: b.h });
         e.at = now;
