@@ -1,7 +1,8 @@
 // One medium full size: its source, its story drawn large, the signal chain with live values,
 // and a rail of all six media to step between them.
 
-import { CARD_TITLES, LED_FACTS, MEDIA, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
+import { firingCaption, pad6, sourceCaption } from '../../show/routing/captions';
+import { ATTRIBUTION, CARD_TITLES, LED_FACTS, MEDIA, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS, VISUAL_OUTPUT_CHAINS } from '../../show/routing/facts';
 import type { MediumKey } from '../../show/routing/facts';
 import type { Box, DetailLayout } from '../../show/routing/layout';
 import { fontPx } from '../../show/routing/layout';
@@ -9,7 +10,7 @@ import { paperMappings } from '../../show/routing/soundFeatures';
 import { printedLayers } from '../../show/routing/vessel';
 import { MONO, arrowHead, clipTo, fitSquare, frame, hangingArms, ledGrid, lines, neuronMap, rateLine, strikers, swarmPanel, text, vesselProfile, vesselTop } from './glyphs';
 import type { G } from './glyphs';
-import { firingCount, pad6, row } from './overview';
+import { firingCount, row } from './overview';
 import type { DrawInput, SwarmKey } from './overview';
 
 const CLOSE_LABEL = '× ROUTING';
@@ -54,14 +55,12 @@ function header(g: G, l: DetailLayout, key: MediumKey) {
 
 /** The organoid as this medium hears it, with the playhead under it. */
 function source(g: G, b: Box, v: DrawInput, only?: 'backbone') {
-    const s = v.scale, px = fontPx(9, s);
-    const map = { ...b, h: b.h - px * 4.5 };
+    const s = v.scale, px = fontPx(10, s);
+    const map = { ...b, h: b.h - px * 6 };
     frame(g, fitSquare(map), '#1e1e1e');
     if (v.live.neurons.length) neuronMap(g, map, v.live.neurons, v.live.spikeGlow, s, only);
-    lines(g, [
-        [v.phase === 'off' ? '■ OFF' : `/index ${v.index === null ? '——————' : pad6(v.index)}`, '#fff'],
-        [only ? `${v.live.backboneSlots.length} backbone neurons of ${v.live.neurons.length}` : `${v.live.neurons.length} neurons · spikes`, '#777'],
-    ], { x: b.x, y: map.y + map.h + px * 0.6, w: b.w, h: px * 4 }, s, 10);
+    const heard = only ? `${v.live.backboneSlots.length} backbone neurons of ${v.live.neurons.length}` : `${v.live.neurons.length} neurons · spikes`;
+    lines(g, sourceCaption(v.phase, v.index, heard), { x: b.x, y: map.y + map.h + px * 0.6, w: b.w, h: px * 5.5 }, s, 10);
 }
 
 /** The story area above the chain. */
@@ -105,7 +104,7 @@ function visual(g: G, l: DetailLayout, v: DrawInput) {
     g.save();
     clipTo(g, below);
     lines(g, [
-        [`${live.firingSource === 'blob' ? `spikes (cyan) vs the normalized rate EoC reads (bars) · line = ${VISUAL_FACTS.threshold}` : 'spikes · no firing blob (data/organoid_firing.f16)'}`, '#999'],
+        [live.firingSource === 'blob' ? `spikes (cyan) vs the normalized rate EoC reads (bars) · line = ${VISUAL_FACTS.threshold}` : `${firingCaption(live.firingSource, live.neurons.length, 0)} (data/${VISUAL_FACTS.blob})`, '#999'],
         ['pass  /sim_resetSimsOnly → /sim_on 5 → T ×5 · P ×10 → /sim_off 5 → 2 min dark, sims paused', '#777'],
         ['one pass = one day: the diurnal sun sweeps the temperature field once per /index pass', '#777'],
         [`out  ${VISUAL_OUTPUT_CHAINS[v.visualOutput].join(' → ')}`, '#bbb'],
@@ -140,17 +139,20 @@ function sound(g: G, l: DetailLayout, v: DrawInput) {
     const norm = live.rate / live.peak, m = paperMappings(norm);
     const cols = row({ x: st.x, y: graph.y + graph.h + 12 * s, w: st.w, h: fontPx(9, s) * 3 }, 4, 16 * s);
     const span = (r: [number, number], value: number) => (value - r[0]) / (r[1] - r[0]); // where in its published range
-    bar(g, cols[0], span(SOUND_FACTS.tone, m.toneDensity), `tones √ ${m.toneDensity.toFixed(2)}/s`, s);
-    bar(g, cols[1], span(SOUND_FACTS.grains, m.grainDensity), `grains ⁶√⁻¹ ${m.grainDensity.toFixed(1)}/s`, s);
+    // The patch's own values when it reports them (LIVE), else the paper mappings of the rate.
+    const sl = live.soundLive, tag = (k: keyof typeof sl) => (sl[k] !== undefined ? ' · LIVE' : '');
+    const tones = sl.tones ?? m.toneDensity, grains = sl.grains ?? m.grainDensity, kick = sl.kick ?? m.kickDensity;
+    bar(g, cols[0], span(SOUND_FACTS.tone, tones), `tones √ ${tones.toFixed(2)}/s${tag('tones')}`, s);
+    bar(g, cols[1], span(SOUND_FACTS.grains, grains), `grains ⁶√⁻¹ ${grains.toFixed(1)}/s${tag('grains')}`, s);
     bar(g, cols[2], span(SOUND_FACTS.grainMs, m.grainMs), `grain ${m.grainMs.toFixed(0)} ms`, s);
-    bar(g, cols[3], span(SOUND_FACTS.kick, m.kickDensity), `kick ${m.kickDensity.toFixed(2)}/s · ${SOUND_FACTS.kickPitch}`, s);
+    bar(g, cols[3], span(SOUND_FACTS.kick, kick), `kick ${kick.toFixed(2)}/s · ${SOUND_FACTS.kickPitch}${tag('kick')}`, s);
     const textBox: Box = { x: st.x, y: cols[0].y + cols[0].h + 10 * s, w: st.w, h: st.y + st.h - (cols[0].y + cols[0].h + 10 * s) };
     g.save();
     clipTo(g, textBox);
     lines(g, [
         [`ranges: ${SOUND_FACTS.rangesSource} · rate normalized to this recording's peak (${live.peak}/100 ms)`, '#777'],
         [`${SOUND_FACTS.descriptionSource}: population firing rate → synthesis density and spatialization; burst endpoints → harmonic transitions`, '#999'],
-        [`${SOUND_FACTS.harmony} · distorted electric guitar · ${SOUND_FACTS.channels} ch · a reverb per channel`, '#999'],
+        [`${SOUND_FACTS.harmony} · distorted electric guitar · ${SOUND_FACTS.channels} ch · a reverb per channel${sl.harmony !== undefined ? ` · harmonic step ${sl.harmony} (LIVE)` : ''}`, '#999'],
         ['← robot sensors over serial  ·  → 27 solenoids', '#bbb'],
         [live.rateSource === 'live' ? 'LIVE · rate from the patch' : SOUND_FACTS.badge, live.rateSource === 'live' ? '#fff' : '#555'],
     ], textBox, s, 9);
@@ -171,7 +173,7 @@ function solenoids(g: G, l: DetailLayout, v: DrawInput) {
     const logBox: Box = { x: st.x, y: grid.y + grid.h + 10 * s, w: st.w, h: st.y + st.h - (grid.y + grid.h + 10 * s) };
     g.save();
     clipTo(g, logBox);
-    const log = live.strikeLog.slice().reverse().map(e => [`slot ${String(e.slot + 1).padStart(2, '0')} · neuron ${e.neuronId} · t ${pad6(e.t)}`, '#999'] as [string, string]);
+    const log = live.strikeLog.slice().reverse().map(e => [`slot ${String(e.slot).padStart(2, '0')} · neuron ${e.neuronId} · t ${pad6(e.t)}`, '#999'] as [string, string]);
     lines(g, [
         ['one solenoid per backbone neuron, in the ceramic vessels and suspended glassware', '#bbb'],
         [live.strikeSource === 'live' ? `LIVE · ${live.strikes} strikes from the patch` : `≈ computed from spikes · the patch is the authority · ${live.strikes} strikes`, live.strikeSource === 'live' ? '#fff' : '#555'],
@@ -190,7 +192,7 @@ function solenoids(g: G, l: DetailLayout, v: DrawInput) {
 function led(g: G, l: DetailLayout, v: DrawInput) {
     const s = l.scale, st = storyTop(l), live = v.live;
     const grids: Box = { ...st, w: st.w * 0.68 };
-    row(grids, 2, 14 * s).forEach(cell => ledGrid(g, cell, live.ledCells, live.ledCyan));
+    row(grids, 2, 14 * s).forEach(cell => ledGrid(g, cell, live.ledCells, live.ledColor, live.ledAgeMs > LED_FACTS.idleMs));
     const side: Box = { x: st.x + st.w * 0.7, y: st.y, w: st.w * 0.3, h: st.h };
     g.save();
     clipTo(g, side);
@@ -221,7 +223,7 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
     g.save();
     clipTo(g, textBox);
     lines(g, [
-        ...live.arms.map((a, k) => [`arm ${k + 1} · ${a.proximity.toFixed(2)} m · servo ${Math.round(a.servo)}° · ${a.live ? 'LIVE' : 'simulated'}`, a.live ? '#fff' : '#999'] as [string, string]),
+        ...live.arms.map((a, k) => [`arm ${k + 1} · ${a.proximity.toFixed(2)} m · servo ${Math.round(a.servo)}°${a.touch ? ' · touched' : ''} · ${a.live ? 'LIVE' : 'simulated'}`, a.live ? '#fff' : '#999'] as [string, string]),
         ['hung upside down: gravity swings each arm as its servo turns', '#777'],
         ['→ sensor values over serial to Max, where they shape the composition', '#bbb'],
         [`┄ ${ROBOT_FACTS.dormant}`, '#555'],
@@ -230,7 +232,7 @@ function robot(g: G, l: DetailLayout, v: DrawInput) {
     g.restore();
     chain(g, l.chain, [
         ['visitor', 'proximity · touch'],
-        [ROBOT_FACTS.sensor, 'ultrasonic + capacitive'],
+        [ROBOT_FACTS.sensor, 'ultrasonic · leaves capacitive'],
         ['Arduino', `→ ${ROBOT_FACTS.servo} 0–180°`],
         ['serial', '→ Max/MSP'],
         ['sound', 'the composition'],
@@ -249,6 +251,7 @@ function robotSource(g: G, b: Box, v: DrawInput) {
         text(g, `${k + 1}`, c.x + c.w / 2, c.y + c.h + 4 * s, fontPx(9, s), '#888', 'center');
     });
     text(g, 'closer = taller', b.x, bars[0].y + bars[0].h + fontPx(9, s) * 2.2, fontPx(8, s), '#555');
+    lines(g, [[ATTRIBUTION, '#5a5a5a']], { x: b.x, y: b.y + b.h - fontPx(10, s) * 3, w: b.w, h: fontPx(10, s) * 3 }, s, 10);
 }
 
 function fab(g: G, l: DetailLayout, v: DrawInput) {
@@ -309,7 +312,7 @@ export function drawRail(g: G, l: DetailLayout, v: DrawInput, active: MediumKey)
         if (key === 'visual') swarmPanel(g, gb, v.swarms.physarum);
         if (key === 'sound') rateLine(g, gb, live.rateHistory, live.rateHead, live.peak);
         if (key === 'solenoids') strikers(g, gb, live.strikeGlow);
-        if (key === 'led') ledGrid(g, gb, live.ledCells, live.ledCyan);
+        if (key === 'led') ledGrid(g, gb, live.ledCells, live.ledColor, live.ledAgeMs > LED_FACTS.idleMs);
         if (key === 'robot') hangingArms(g, gb, live.arms, s * 0.6);
         if (key === 'fab' && v.vessel) vesselTop(g, gb, v.vessel, v.vesselLayer, 6);
         g.restore();

@@ -296,8 +296,11 @@ The audio computer's Max patch handles the other three:
 
 | Address | Args |
 |---|---|
-| `/routing/sound/rate` · `/burst` · `/harmony` · `/tones` · `/grains` · `/kick` | float |
-| `/routing/solenoid` | slot 0–26 [, velocity] |
+| `/routing/sound/rate` | float: spikes per 100 ms, the unit the card computes in |
+| `/routing/sound/burst` | 0/1 |
+| `/routing/sound/harmony` | int: the harmonic step |
+| `/routing/sound/tones` · `/grains` · `/kick` | float: events/s |
+| `/routing/solenoid` | slot 0–26 (the k-th backbone neuron in `neurons.csv` row order) [, velocity 0–1] |
 | `/routing/robot/<1-3>/proximity` (cm) · `/servo` (°) · `/touch` (0/1) | float |
 
 ## Spout Output

@@ -22,11 +22,12 @@ export interface Reading {
 
 export interface Telemetry {
     sound: Partial<Record<SoundField, Reading>>;
-    strikes: { slot: number; velocity: number; at: number }[]; // newest last
+    strikes: { slot: number; velocity: number; at: number; seq: number }[]; // newest last
     robot: Partial<Record<RobotField, Reading>>[]; // arms 1–3 at 0–2
+    seq: number; // the last strike's number: strikes can share a timestamp
 }
 
-export const createTelemetry = (): Telemetry => ({ sound: {}, strikes: [], robot: [{}, {}, {}] });
+export const createTelemetry = (): Telemetry => ({ sound: {}, strikes: [], robot: [{}, {}, {}], seq: 0 });
 
 export const fresh = (r: { at: number } | undefined, now: number): boolean => r !== undefined && now - r.at < TELEMETRY_FRESH_MS;
 
@@ -35,6 +36,15 @@ function num(arg: unknown): number | null {
     if (typeof arg !== 'number' && !(typeof arg === 'string' && arg.trim() !== '')) return null;
     const v = Number(arg);
     return Number.isFinite(v) ? v : null;
+}
+
+/** Every /routing/* message belongs to the routing view, well-formed or not, so none of them
+ *  reaches the rest of the app (at 10 Hz+ that would re-render it). Records the well-formed ones;
+ *  true when the message was the routing view's. */
+export function consumeRoutingOsc(t: Telemetry, address: unknown, args: unknown[], now: number): boolean {
+    if (typeof address !== 'string' || !address.startsWith('/routing/')) return false;
+    applyTelemetry(t, address, Array.isArray(args) ? args : [], now);
+    return true;
 }
 
 /** Record one inbound message; true only for a well-formed /routing/* message. */
@@ -50,7 +60,7 @@ export function applyTelemetry(t: Telemetry, address: string, args: unknown[], n
     }
     if (parts.length === 3 && parts[2] === 'solenoid') {
         if (!Number.isInteger(value) || value < 0 || value >= SLOTS) return false;
-        t.strikes.push({ slot: value, velocity: num(args[1]) ?? 1, at: now });
+        t.strikes.push({ slot: value, velocity: num(args[1]) ?? 1, at: now, seq: ++t.seq });
         if (t.strikes.length > MAX_STRIKES) t.strikes.splice(0, t.strikes.length - MAX_STRIKES);
         return true;
     }

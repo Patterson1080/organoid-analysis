@@ -21,7 +21,7 @@ import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledF
 import type { LedFrame } from './show/ledFrame';
 import { parseFiringBlob } from './show/routing/firingBlob';
 import type { FiringBlob } from './show/routing/firingBlob';
-import { applyTelemetry, createTelemetry } from './show/routing/telemetry';
+import { consumeRoutingOsc, createTelemetry } from './show/routing/telemetry';
 import { parseVesselGcode } from './show/routing/vessel';
 import type { Vessel } from './show/routing/vessel';
 import { parseNeuronCSV, parseSpikeCSV } from './utils/dataProcessing';
@@ -285,7 +285,7 @@ function App() {
                     const data = JSON.parse(event.data);
                     if (data.type === 'OSC_MSG') {
                         // Telemetry for the routing view arrives many times a second: kept out of React state.
-                        if (applyTelemetry(routingTelemetryRef.current, data.payload.address, data.payload.args, performance.now())) return;
+                        if (consumeRoutingOsc(routingTelemetryRef.current, data.payload.address, data.payload.args, performance.now())) return;
                         setLastOscMessage(data.payload);
                         // Handle /row input
                         if (data.payload.address === '/row' && data.payload.args.length > 0) {

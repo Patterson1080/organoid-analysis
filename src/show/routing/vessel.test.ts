@@ -46,6 +46,10 @@ test('no moves throws', () => {
     assert.throws(() => parseVesselGcode('; nothing\n'), /no toolpath moves/);
 });
 
+test('moves that make no layer throw too (a vessel always has one)', () => {
+    assert.throws(() => parseVesselGcode('G1 X0 Y10 Z-1\nG1 X10 Y0 Z-1\n'), /no toolpath layers/);
+});
+
 const v283: Vessel = {
     layers: Array.from({ length: 283 }, () => ({ pts: new Float32Array(0), radius: 0 })),
     layerMm: 1.6,

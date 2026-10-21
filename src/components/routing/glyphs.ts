@@ -174,21 +174,23 @@ export function strikers(g: G, b: Box, glow: Float32Array): void {
     }
 }
 
-/** A 16 × 16 matrix: lit cells white, firing cells cyan, as the fibers show them. */
-export function ledGrid(g: G, b: Box, cells: Float32Array, cyan: Uint8Array): void {
+// DualLED_Currents.ino's palette, by the codes in live.ts's LED_COLOR.
+const LED_RGB: Record<number, string> = { 1: '50,255,255', 3: '255,50,50', 4: '255,50,255', 5: '50,50,255' };
+
+/** A 16 × 16 matrix as the sketch lights it: a white baseline (dimmer while frames arrive,
+ *  brighter when idle), each pixel's color blended over it by its remaining life. */
+export function ledGrid(g: G, b: Box, cells: Float32Array, colors: Uint8Array, idle: boolean): void {
     const sq = fitSquare(b);
     const c = sq.w / 16;
-    g.fillStyle = '#080808';
+    g.fillStyle = '#050505';
     g.fillRect(sq.x, sq.y, sq.w, sq.h);
+    g.fillStyle = idle ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.16)';
+    for (let i = 0; i < 256; i++) g.fillRect(sq.x + (i % 16) * c + c * 0.15, sq.y + Math.floor(i / 16) * c + c * 0.15, c * 0.7, c * 0.7);
     for (let i = 0; i < 256; i++) {
-        const v = cells[i], x = sq.x + (i % 16) * c, y = sq.y + Math.floor(i / 16) * c;
-        if (v < 0.03) {
-            g.fillStyle = '#171717';
-            g.fillRect(x + c * 0.25, y + c * 0.25, c * 0.5, c * 0.5);
-        } else {
-            g.fillStyle = cyan[i] ? `rgba(0,255,255,${v})` : `rgba(255,255,255,${v})`;
-            g.fillRect(x + c * 0.1, y + c * 0.1, c * 0.8, c * 0.8);
-        }
+        const v = cells[i];
+        if (v < 0.03 || !LED_RGB[colors[i]]) continue;
+        g.fillStyle = `rgba(${LED_RGB[colors[i]]},${Math.min(1, v)})`;
+        g.fillRect(sq.x + (i % 16) * c + c * 0.1, sq.y + Math.floor(i / 16) * c + c * 0.1, c * 0.8, c * 0.8);
     }
     frame(g, sq, '#262626');
 }

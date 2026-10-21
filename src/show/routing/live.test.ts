@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceLive, createLiveState } from './live.ts';
+import { LED_COLOR, advanceLive, createLiveState } from './live.ts';
 import type { LiveInput } from './live.ts';
 import { parseFiringBlob } from './firingBlob.ts';
 import { applyTelemetry, createTelemetry } from './telemetry.ts';
@@ -64,22 +64,96 @@ test('the blob drives firing only when it matches', () => {
     assert.deepEqual([...s.firing], [1, 0.5, 0]);
     const other = createLiveState(neurons, spikes);
     advanceLive(other, input({ index: 10, blob: parseFiringBlob(blob(131, 20, {})) }));
-    assert.equal(other.firingSource, 'spikes');
+    assert.equal(other.firingSource, 'mismatch'); // a blob, but for another dataset
     assert.equal(other.firing[1], 1); // the spike glow stands in
+    const none = createLiveState(neurons, spikes);
+    advanceLive(none, input({ index: 10 }));
+    assert.equal(none.firingSource, 'spikes');
 });
 
-test('an LED frame becomes cells and serial lines', () => {
+test('a held playhead fades the firing like EoC and stops the flow', () => {
+    const b = parseFiringBlob(blob(3, 20, { 10: [0x3c00, 0x3800, 0], 11: [0x3800, 0, 0] }));
+    const s = createLiveState(neurons, spikes);
+    advanceLive(s, input({ index: 10, blob: b, now: 0 }));
+    assert.deepEqual([...s.firing], [1, 0.5, 0]);
+    assert.equal(s.moving, true);
+    for (let now = 100; now <= 800; now += 100) advanceLive(s, input({ index: 10, blob: b, now, dtMs: 100 }));
+    assert.equal(s.moving, false); // paused: nothing is being sent
+    assert.deepEqual([...s.firing], [0, 0, 0]); // faded over EoC's 0.5 s
+    assert.equal(s.firingSource, 'blob');
+    advanceLive(s, input({ index: 11, blob: b, now: 900 }));
+    assert.equal(s.moving, true);
+    assert.deepEqual([...s.firing], [0.5, 0, 0]);
+});
+
+test('local playback keeps every spike of a frame, up to 250 ms; a bigger jump keeps 30 ms', () => {
+    const sp: SpikeEvent[] = [{ timestamp_ms: 10, neuron_id: 1 }, { timestamp_ms: 40, neuron_id: 3 }, { timestamp_ms: 500, neuron_id: 1 }, { timestamp_ms: 1030, neuron_id: 2 }];
+    const s = createLiveState(neurons, sp);
+    advanceLive(s, input({ index: 0, spikes: sp }));
+    advanceLive(s, input({ index: 45, spikes: sp })); // a 45 ms frame at 1× playback
+    assert.deepEqual(s.fired, [0, 2]);
+    advanceLive(s, input({ index: 1045, spikes: sp })); // a scrub forward
+    assert.deepEqual(s.fired, [1]); // t 1030 only, not t 500
+});
+
+test('fresh sound telemetry stands in for the computed values', () => {
+    const t = createTelemetry();
+    const s = createLiveState(neurons, spikes);
+    applyTelemetry(t, '/routing/sound/burst', [1], 1000);
+    applyTelemetry(t, '/routing/sound/tones', [7.5], 1000);
+    applyTelemetry(t, '/routing/sound/harmony', [3], 1000);
+    advanceLive(s, input({ index: 200, telemetry: t, now: 1000 }));
+    assert.equal(s.burst.inBurst, true); // the patch says burst, though the computed rate is 0
+    assert.deepEqual(s.soundLive, { tones: 7.5, harmony: 3 });
+    applyTelemetry(t, '/routing/sound/burst', [0], 1100);
+    advanceLive(s, input({ index: 201, telemetry: t, now: 1100 }));
+    assert.deepEqual(s.burst, { inBurst: false, ends: 1 });
+    advanceLive(s, input({ index: 202, telemetry: t, now: 5000 }));
+    assert.deepEqual(s.soundLive, {}); // stale
+});
+
+test('fresh touch telemetry marks its arm', () => {
+    const t = createTelemetry();
+    const s = createLiveState(neurons, spikes);
+    applyTelemetry(t, '/routing/robot/2/touch', [1], 1000);
+    advanceLive(s, input({ index: 200, telemetry: t, now: 1000 }));
+    assert.deepEqual(s.arms.map(a => a.touch), [false, true, false]);
+    advanceLive(s, input({ index: 201, telemetry: t, now: 5000 }));
+    assert.deepEqual(s.arms.map(a => a.touch), [false, false, false]);
+});
+
+test('telemetry strikes at the same timestamp are each shown once', () => {
+    const t = createTelemetry();
+    const s = createLiveState(neurons, spikes);
+    applyTelemetry(t, '/routing/solenoid', [1], 1000);
+    advanceLive(s, input({ index: 200, telemetry: t, now: 1000 }));
+    assert.equal(s.strikeGlow[1], 1);
+    applyTelemetry(t, '/routing/solenoid', [2], 1000); // same coarse timestamp, after that frame
+    advanceLive(s, input({ index: 201, telemetry: t, now: 1001 }));
+    assert.equal(s.strikeGlow[2], 1);
+    assert.equal(s.strikes, 2);
+});
+
+test('an LED frame lights the matrix as DualLED_Currents draws it, and gives its serial lines', () => {
     const s = createLiveState(neurons, spikes);
     advanceLive(s, input({ index: 10, ledFrame: { isBurst: false, firings: [{ x: 2, y: 3 }] } }));
-    assert.equal(s.ledCyan[3 * 16 + 2], 1);
-    assert.equal(s.ledCells[3 * 16 + 2], 1);
-    assert.ok(Math.abs(s.ledCells[3 * 16 + 3] - 0.55) < 1e-6);
+    // F:x,y — the cell cyan at full life, a cyan halo at half life
+    assert.deepEqual([s.ledColor[3 * 16 + 2], s.ledCells[3 * 16 + 2]], [LED_COLOR.cyan, 1]);
+    assert.deepEqual([s.ledColor[3 * 16 + 3], s.ledCells[3 * 16 + 3]], [LED_COLOR.cyan, 0.5]);
     assert.deepEqual(s.ledLines, ['F:2,3']);
+    // C:x,y — a disc of radius 3: red centre, purple to distance 2, blue to 3
+    advanceLive(s, input({ index: 11, ledFrame: { isBurst: true, firings: [{ x: 8, y: 8 }] } }));
+    const at = (x: number, y: number) => [s.ledColor[y * 16 + x], s.ledCells[y * 16 + x]];
+    assert.deepEqual(at(8, 8), [LED_COLOR.red, 1]);
+    assert.deepEqual(at(9, 8), [LED_COLOR.purple, 1]);
+    assert.deepEqual(at(10, 8), [LED_COLOR.purple, 1]);
+    assert.deepEqual(at(11, 8), [LED_COLOR.blue, 1]);
+    assert.equal(s.ledCells[8 * 16 + 12], 0); // distance 4: untouched
     const burst = { isBurst: true, firings: Array.from({ length: 12 }, (_, i) => ({ x: i, y: 15 - i })) };
-    advanceLive(s, input({ index: 11, ledFrame: burst }));
+    advanceLive(s, input({ index: 12, ledFrame: burst }));
     assert.equal(s.ledLines.length, 10);
     assert.ok(s.ledLines.every(l => l.startsWith('C:')));
-    assert.equal(s.ledFrames, 2);
+    assert.equal(s.ledFrames, 3);
 });
 
 test('fresh telemetry strikes replace computed ones', () => {

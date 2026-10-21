@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, MutableRefObject, PointerEvent as ReactPointerEvent } from 'react';
 import type { Neuron, SpikeEvent } from '../types';
 import type { LedFrame } from '../show/ledFrame';
-import { extrapolateIndex, formatClock, phaseRemainingMs } from '../show/showMath';
+import { formatClock } from '../show/showMath';
 import { CARD_TITLES, VISUAL_FACTS } from '../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../show/routing/facts';
 import type { FiringBlob } from '../show/routing/firingBlob';
 import { detailLayout, hitBox, routingLayout } from '../show/routing/layout';
 import type { Box, DetailLayout, RoutingLayout } from '../show/routing/layout';
 import { advanceLive, createLiveState } from '../show/routing/live';
+import { routingPlayhead } from '../show/routing/playhead';
 import { SWARM_SPECS, createSwarm, fleeSources, stepSwarm } from '../show/routing/swarm';
 import type { Swarm } from '../show/routing/swarm';
 import type { Telemetry } from '../show/routing/telemetry';
@@ -40,6 +41,7 @@ interface RoutingViewProps {
 }
 
 const FRAME_MS = 1000 / 30; // a display, not a control: same cap as the circular graph
+const FRAME_SLACK_MS = 2; // vsync jitter: without it the gate often skips to 41.7 or 50 ms frames
 const SWARM_PX = 512;
 const SWARM_KEYS: SwarmKey[] = ['physarum', 'boids', 'termites'];
 const SWARM_STYLES: Record<SwarmKey, SwarmStyle> = {
@@ -69,6 +71,8 @@ export function RoutingView(props: RoutingViewProps) {
     const [settings, setSettings] = useState<RoutingSettings>(() => loadRoutingSettings());
     const settingsRef = useRef(settings);
     settingsRef.current = settings;
+    const connectedRef = useRef(props.connected); // read by the loop: a dropped bridge means local playback
+    connectedRef.current = props.connected;
     const tourRef = useRef<TourState>(createTour(performance.now(), settings.tour));
     const [width, setWidth] = useState(0);
     const [fitHeight, setFitHeight] = useState(0);
@@ -168,30 +172,29 @@ export function RoutingView(props: RoutingViewProps) {
         let wasTouring = true;
         let tourText = '';
 
+        let failed = false;
         const frame = (ts: number) => {
             raf = requestAnimationFrame(frame);
             if (document.hidden || !visibleRef.current) {
                 last = 0;
                 return;
             }
-            if (last && ts - last < FRAME_MS) return;
+            if (last && ts - last < FRAME_MS - FRAME_SLACK_MS) return;
             const dtMs = last ? ts - last : FRAME_MS;
             last = ts;
-
-            const snap = showLatestRef.current;
-            const st = snap?.state;
-            const mode: 'show' | 'local' = st?.running ? 'show' : 'local';
-            let index: number | null = null;
-            let phase: 'on' | 'off' | 'stopped' = 'stopped';
-            let offRemainingMs = 0;
-            if (st?.running && snap) {
-                const since = ts - snap.receivedAt;
-                phase = st.phase === 'off' ? 'off' : 'on';
-                index = extrapolateIndex(st, since);
-                if (phase === 'off') offRemainingMs = phaseRemainingMs(st, since);
-            } else if (neurons.length) {
-                index = playbackTimeRef.current;
+            try {
+                draw(ts, dtMs);
+            } catch (e) {
+                // One bad frame must not freeze the view for the rest of a show: reset the
+                // context (a throw can leave save()s unbalanced) and try again next frame.
+                if (!failed) console.error('Routing view frame failed:', e);
+                failed = true;
+                canvas.width = canvas.width;
             }
+        };
+
+        const draw = (ts: number, dtMs: number) => {
+            const { index, phase, mode, offRemainingMs } = routingPlayhead(showLatestRef.current, connectedRef.current, playbackTimeRef.current, neurons.length > 0, ts);
             if (index !== null) parked = index;
 
             // The tour picks the view while it runs; a pause leaves the manual choice; when the

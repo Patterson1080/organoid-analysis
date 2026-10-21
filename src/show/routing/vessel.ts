@@ -77,6 +77,7 @@ export function parseVesselGcode(text: string, pointsPerLayer = 200): Vessel {
         layers.push({ pts: out, radius });
         maxRadius = Math.max(maxRadius, radius);
     }
+    if (layers.length === 0) throw new Error('no toolpath layers'); // e.g. every move below the bed
     return { layers, layerMm, heightMm, maxRadius, header };
 }
 

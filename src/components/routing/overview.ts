@@ -2,6 +2,7 @@
 // the audio computer's group on the other, and the spokes between them.
 
 import { formatClock } from '../../show/showMath';
+import { firingCaption, pad6 } from '../../show/routing/captions';
 import { ATTRIBUTION, CARD_TITLES, LED_FACTS, ROBOT_FACTS, SOUND_FACTS, VESSEL_FACTS, VISUAL_FACTS } from '../../show/routing/facts';
 import type { MediumKey, VisualOutput } from '../../show/routing/facts';
 import type { Box, RoutingLayout } from '../../show/routing/layout';
@@ -39,7 +40,6 @@ export const firingCount = (live: LiveState) => {
     return n;
 };
 
-export const pad6 = (v: number) => String(Math.floor(v)).padStart(6, '0');
 
 /** A card's header band and the body below it, split into a glyph area and a text area. */
 export function cardParts(b: Box, scale: number, textRows: number): { glyph: Box; textBox: Box } {
@@ -78,7 +78,9 @@ function anchor(b: Box, cx: number, cy: number): [number, number] {
     return [Math.min(Math.max(cx, b.x), b.x + b.w), Math.min(Math.max(cy, b.y), b.y + b.h)];
 }
 
-function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offline', now: number): { sx: number; sy: number; ax: number; ay: number } {
+/** A spoke from the organoid to a card. `/index` streams flow as moving dashes only while the
+ *  playhead advances, since nothing is sent otherwise. */
+function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offline', now: number, flowing = true): { sx: number; sy: number; ax: number; ay: number } {
     const { cx, cy, r } = l.centre;
     const [ax, ay] = anchor(b, cx, cy);
     const a = Math.atan2(ay - cy, ax - cx);
@@ -87,7 +89,7 @@ function spoke(g: G, l: RoutingLayout, b: Box, kind: 'stream' | 'event' | 'offli
     if (kind === 'stream') {
         g.strokeStyle = '#9a9a9a';
         g.setLineDash([2, 5]);
-        g.lineDashOffset = -now / DASH_FLOW_MS;
+        g.lineDashOffset = flowing ? -now / DASH_FLOW_MS : 0;
     } else {
         g.strokeStyle = kind === 'offline' ? '#333' : '#3a3a3a';
         g.setLineDash(kind === 'offline' ? [1, 4] : []);
@@ -165,15 +167,13 @@ function drawVisual(g: G, b: Box, v: DrawInput) {
         const sw = VISUAL_FACTS.swarms[keys[i]];
         text(g, `${sw.label} ${sw.agents}`, cell.x + cell.w / 2, cell.y + cell.h - labelH + 2 * s, fontPx(8, s), '#bbb', 'center');
     });
-    const firingLine: [string, string] = v.live.firingSource === 'blob'
-        ? [`SetFrame → ${v.live.neurons.length} intensities · ${firingCount(v.live)} ≥ ${VISUAL_FACTS.threshold}`, '#bbb']
-        : ['spikes · no firing blob', '#bbb'];
+    const firingLine: [string, string] = [firingCaption(v.live.firingSource, v.live.neurons.length, firingCount(v.live)), '#bbb'];
     lines(g, [firingLine, ['firing → speed ×2 / ×1.5 / ×2 · deposit', '#888'], ['termite firing → Dispersal → others flee', '#888']], textBox, s);
 }
 
 function drawLed(g: G, b: Box, v: DrawInput) {
     const s = v.scale, live = v.live, { glyph, textBox } = cardParts(b, s, 3);
-    row(glyph, 2, 6 * s).forEach(cell => ledGrid(g, cell, live.ledCells, live.ledCyan));
+    row(glyph, 2, 6 * s).forEach(cell => ledGrid(g, cell, live.ledCells, live.ledColor, live.ledAgeMs > LED_FACTS.idleMs));
     const last = live.ledLines.slice(0, 2).join('  ') || '—';
     lines(g, [[`F:x,y / C:x,y @${LED_FACTS.baud}`, '#aaa'], [`trail ${LED_FACTS.trail} · burst >${LED_FACTS.burstOver}`, '#777'], [last, '#555']], textBox, s);
 }
@@ -218,8 +218,8 @@ function drawRobot(g: G, b: Box, v: DrawInput) {
     hangingArms(g, glyph, live.arms, s);
     const anyLive = live.arms.some(a => a.live);
     lines(g, [
-        [`VISITORS → ${ROBOT_FACTS.sensor} → ${ROBOT_FACTS.servo} 0–180°`, '#aaa'],
-        [`${live.arms.map(a => `${a.proximity.toFixed(1)} m`).join(' · ')}`, '#777'],
+        [`VISITORS (proximity, touch) → ${ROBOT_FACTS.sensor} → ${ROBOT_FACTS.servo} 0–180°`, '#aaa'],
+        [`${live.arms.map(a => `${a.proximity.toFixed(1)} m${a.touch ? ' · touch' : ''}`).join(' · ')}`, '#777'],
         ['→ serial → Max → sound', '#bbb'],
         [anyLive ? 'LIVE · from the audio computer' : ROBOT_FACTS.badge, anyLive ? '#fff' : '#555'],
     ], textBox, s);
@@ -235,8 +235,9 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
     text(g, 'AUDIO COMPUTER · Max/MSP', audioFrame.x + 8 * s, audioFrame.y + 3 * s, fontPx(9, s), '#888');
 
     // Spokes from the bridge; their tags go on after the cards.
-    const toVisual = spoke(g, l, cards.visual, 'stream', v.now);
-    const toSound = spoke(g, l, cards.sound, 'stream', v.now);
+    const flowing = live.moving && v.phase !== 'off';
+    const toVisual = spoke(g, l, cards.visual, 'stream', v.now, flowing);
+    const toSound = spoke(g, l, cards.sound, 'stream', v.now, flowing);
     const toLed = spoke(g, l, cards.led, 'event', v.now);
     if (live.lastLedFrame) pulse(g, toLed, live.ledAgeMs / PULSE_MS, s);
     const toFab = spoke(g, l, cards.fab, 'offline', v.now);
@@ -290,7 +291,7 @@ export function drawOverview(g: G, l: RoutingLayout, v: DrawInput): void {
     spokeTag(g, toVisual, `OSC :${VISUAL_FACTS.port}`, boxes, s);
     spokeTag(g, toSound, 'OSC', boxes, s);
     spokeTag(g, toLed, 'SERIAL', boxes, s);
-    spokeTag(g, toFab, 'offline', boxes, s, '#666');
+    spokeTag(g, toFab, 'before the show', boxes, s, '#666');
     const px = fontPx(8, s);
     tag(g, 'strikes', (link.sx + link.ax) / 2, (link.sy + link.ay) / 2, px, '#888');
     const [end, corner] = [loop[3], loop[2]];
