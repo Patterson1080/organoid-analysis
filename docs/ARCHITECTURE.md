@@ -14,7 +14,7 @@ Brain organoid MEA visualizer + show driver. React/Vite frontend, Node bridges f
 
 ## Data
 
-The spike CSV is a binary matrix: one row per millisecond, 131 neuron columns, `1` = spike (`src/utils/dataProcessing.ts`). Spikes are kept sorted by `timestamp_ms` in `App`'s `allSpikesRef`. Playback time is data milliseconds; `/index` = that millisecond = the EoC firing-blob frame (131 neurons × 180000 frames).
+The spike CSV is a binary matrix: one row per millisecond, 131 neuron columns, `1` = spike (`src/utils/dataProcessing.ts`). The file holds three 131-column blocks, spikes (`t_spk_mat_*`), rates (`rate_mat_*`) and normalized rates (`rates_norm_*`); the parsers read only the spikes. EoC's firing blob (`organoid_firing.f16`) is the normalized-rate block, which the routing view loads separately. Spikes are kept sorted by `timestamp_ms` in `App`'s `allSpikesRef`. Playback time is data milliseconds; `/index` = that millisecond = the EoC firing-blob frame (131 neurons × 180000 frames).
 
 ## Local playback
 
@@ -38,10 +38,47 @@ ShowPanel ──SHOW_START{config} / SHOW_STOP──▶ osc-bridge.js ──UDP�
 - `server/show-data.js` — loads `data/` for the bridge: neuron positions (`src/utils/neuronRows.ts`, shared with the page's uploader) and the spike matrix streamed into neuron ids per ms (first 131 columns, as the page reads it).
 - `src/show/ledFrame.ts` — the LED frame (recent-5 trail, burst when > 5 neurons fire at once, 0–15 grid cells, ≤ 30 ms of data per tick). Imported by the page and by the bridge (Node strips the TypeScript types natively), so both light the LEDs the same way. During the show the bridge sends it to the serial bridge when it has `data/` (`SHOW_STATE.leds`); the page then sends none.
 - `osc-bridge.js` — wires the runner to every OSC destination; drops `OSC_BUNDLE`/`OSC_SEND` while the show runs; broadcasts `SHOW_STATE` every tick and to each new tab; ignores a reconnecting tab's initial `CONFIG` mid-show and replies `OSC_CONFIG`.
-- `src/components/ShowPanel.tsx` — HUD, firing overview + cue ticks, cycle bar, ±1 s raster; draws from a ref in its own rAF loop, extrapolating the index between messages (`src/show/showMath.ts`).
+- `src/components/ShowPanel.tsx` — HUD, firing overview + cue ticks, cycle bar, ±1 s raster; draws from a ref in its own rAF loop, extrapolating the index between messages (`src/show/showMath.ts`). The routing view sits below it (next section).
 - `App.tsx` — mirrors `SHOW_STATE` into the playhead for the other views and feeds the spikes since the last message to `emitFrameOutputs` (sound, recent-neuron trail, and LED serial unless the bridge drives it); loads `data/` from the bridge on connect; locks local transport and gestures; persists OSC settings (`src/utils/oscSettings.ts`).
 
 Cycle: `/sim_resetSimsOnly`, `/sim_on 5` → `/index` 0→179999 at 60/s (+5 termite, 10 physarum resets) → `/sim_off 5` → 120 s silence. EoC side: `SimulationManager.SetOutputOn` (master composite level, `pauseWhenDark`), on its `show-sim-off` branch.
+
+## Routing view
+
+A depiction of where the signal goes, inside the SHOW panel; it only reads, and never sends OSC, serial or sound.
+
+```
+SHOW_STATE / playbackTimeRef ─┐
+emitFrameOutputs → lastLedFrameRef ─┤
+OSC_MSG /routing/* → applyTelemetry ─┼─▶ RoutingView (30 fps rAF) ─ advanceLive ─▶ drawOverview | drawDetail
+data/organoid_firing.f16, vessel.gcode ─┘          (src/show/routing/live.ts)   (src/components/routing/)
+```
+
+**Rules** live in `src/show/routing/`. They're pure, Node-tested modules with explicit `.ts` imports:
+- `facts.ts`: every number and label shown, from the running system: the 11.3 scene, the G-code, the bridge.
+- `layout.ts`: boxes from the area's size, landscape at w/h ≥ 1.1, else portrait; type scale.
+- `firingBlob.ts`: EoC's `TFR1` half-float blob of normalized rates, one row per index.
+- `soundFeatures.ts`: population rate, burst ends, the VISAP mappings.
+- `vessel.ts`: G-code → layers centred on the axis; layer ≈ linear in the index; printed cut-off.
+- `tour.ts`: 20 s stops, 60 s idle resume.
+- `telemetry.ts`: the `/routing/*` contract and freshness.
+- `swarm.ts`: stand-in agents seeded on the neuron positions.
+- `playhead.ts`: which clock to follow: the show's while it runs and the bridge is connected, else local playback.
+- `captions.ts`: state-dependent copy (the playhead line, where the firing comes from, the attribution under every detail source).
+- `live.ts`: per-frame state from the playhead.
+  - **Spikes:** a forward step up to 250 ms keeps all its spikes; a bigger or backwards jump keeps 30 ms.
+  - **Held playhead:** after 150 ms still, the playhead counts as stopped. The firing fades like EoC's 0.5 s and the `/index` dashes stop.
+  - **Also held:** glows, strikes, the rate and burst state (fresh telemetry wins), the LED pixels as `DualLED_Currents.ino` draws `F:`/`C:`, the serial lines, and the arms.
+
+**View:** `src/components/RoutingView.tsx` owns the canvas, the loop, the tour and the operator settings (`src/utils/routingSettings.ts`). The loop is paused when hidden or off-screen. Drawing lives in `src/components/routing/` (`glyphs.ts`, `overview.ts`, `details.ts`).
+
+**Inputs** come through ShowPanel:
+- the show snapshot, or `playbackTimeRef` when no show runs;
+- `lastLedFrameRef`: the frame `emitFrameOutputs` computed, sent or not; during the show the bridge runs the same `ledStep` on the same slices;
+- `routingTelemetryRef`: `OSC_MSG` for `/routing/*`, applied before `setLastOscMessage` so telemetry never re-renders App;
+- the firing blob and the vessel, fetched once from the bridge's `data/` (`server/data-files.js`) when `/data/status` lists them.
+
+**Sizing:** outside presentation the canvas is width × 9/16, at least 420 px. In presentation the raster stays at 160 px and the routing canvas takes `innerHeight` minus its top, at least 360 px.
 
 ## Tests
 

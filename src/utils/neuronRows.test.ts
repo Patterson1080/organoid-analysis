@@ -16,6 +16,7 @@ test('labels_positions rows (backbone_labels, xy_norm_0/1) are numbered by row',
         { backbone_labels: 1, xy_norm_0: 0.5, xy_norm_1: 0.2 },
     ]);
     assert.deepEqual(ns.map(n => [n.neuron_id, n.x, n.y]), [[1, 0.98, 0.39], [2, 0.5, 0.2]]);
+    assert.deepEqual(ns.map(n => n.is_backbone), [false, true]);
 });
 
 test('rows missing a coordinate are dropped; no x/y columns gives no neurons', () => {

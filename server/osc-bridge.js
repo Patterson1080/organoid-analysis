@@ -1,12 +1,12 @@
 import http from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import path from 'node:path';
 import { pipeline } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { Client, Server } from 'node-osc';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createShowRunner } from './show-runner.js';
 import { isLocalHost, isLocalOrigin } from './local-origin.js';
+import { dataRoutes, dataStatus } from './data-files.js';
 import { loadNeurons, loadSpikeFrames, spikeIdsBetween } from './show-data.js';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from '../src/show/ledFrame.ts';
 
@@ -17,11 +17,12 @@ const DEFAULT_OSC_OUT_IP = '127.0.0.1';
 const WS_PORT = 8080;
 const SERIAL_WS_URL = 'ws://127.0.0.1:8081';
 
-// The show dataset: data/neurons.csv + data/spikes.csv (usually symlinks to the real files).
-// Served to the page and read here to drive the LEDs. ORGANOID_DATA_DIR overrides (tests).
+// The show dataset in data/ (usually symlinks to the real files, see data-files.js): served to
+// the page, and the CSVs are read here to drive the LEDs. ORGANOID_DATA_DIR overrides (tests).
 const DATA_DIR = process.env.ORGANOID_DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url));
-const DATA_FILES = { neurons: path.join(DATA_DIR, 'neurons.csv'), spikes: path.join(DATA_DIR, 'spikes.csv') };
-const DATA_ROUTES = new Map([['/data/neurons.csv', DATA_FILES.neurons], ['/data/spikes.csv', DATA_FILES.spikes]]);
+const DATA_ROUTES = dataRoutes(DATA_DIR);
+const NEURONS_CSV = DATA_ROUTES.get('/data/neurons.csv').path;
+const SPIKES_CSV = DATA_ROUTES.get('/data/spikes.csv').path;
 
 // State
 let oscServer;
@@ -122,8 +123,8 @@ function broadcast(message) {
     });
 }
 
-// GET /data/status, /data/neurons.csv, /data/spikes.csv — the page loads the show dataset
-// from here on connect, so a reloaded tab needs no re-upload. Local pages and hosts only.
+// GET /data/status and /data/<file> (data-files.js) — the page loads the show dataset from
+// here on connect, so a reloaded tab needs no re-upload. Local pages and hosts only.
 function serveData(req, res) {
     const origin = req.headers.origin;
     if (!isLocalOrigin(origin) || !isLocalHost(req.headers.host)) {
@@ -137,30 +138,30 @@ function serveData(req, res) {
     }
     if (req.url === '/data/status') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ neurons: existsSync(DATA_FILES.neurons), spikes: existsSync(DATA_FILES.spikes) }));
+        res.end(JSON.stringify(dataStatus(DATA_DIR)));
         return;
     }
-    const file = DATA_ROUTES.get(req.url);
-    if (!file || !existsSync(file)) {
+    const route = DATA_ROUTES.get(req.url);
+    if (!route || !existsSync(route.path)) {
         res.writeHead(404).end();
         return;
     }
-    res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Length': statSync(file).size });
+    res.writeHead(200, { 'Content-Type': route.type, 'Content-Length': statSync(route.path).size });
     // pipeline, not pipe: a read error (e.g. an unreadable symlink target) ends this
     // response instead of throwing and taking the show down with the bridge.
-    pipeline(createReadStream(file), res, err => {
+    pipeline(createReadStream(route.path), res, err => {
         if (err) console.warn(`Serving ${req.url} stopped: ${err.message}`);
     });
 }
 
 async function loadShowData() {
-    if (!existsSync(DATA_FILES.neurons) || !existsSync(DATA_FILES.spikes)) {
+    if (!existsSync(NEURONS_CSV) || !existsSync(SPIKES_CSV)) {
         console.log(`No show data in ${DATA_DIR} (neurons.csv + spikes.csv): LEDs follow the browser tab`);
         return;
     }
     const t0 = Date.now();
-    const neurons = await loadNeurons(DATA_FILES.neurons);
-    const frames = await loadSpikeFrames(DATA_FILES.spikes);
+    const neurons = await loadNeurons(NEURONS_CSV);
+    const frames = await loadSpikeFrames(SPIKES_CSV);
     showData = { neuronById: neuronsById(neurons), bounds: neuronBounds(neurons) ?? { minX: 0, maxX: 1, minY: 0, maxY: 1 }, frames };
     console.log(`Show data: ${neurons.length} neurons, ${frames.frameCount} frames, ${frames.ids.length} spikes ` +
         `(${((Date.now() - t0) / 1000).toFixed(1)} s) — LEDs driven by the bridge`);
@@ -211,8 +212,9 @@ function startOscServer(port) {
 
         oscServer.on('message', (msg) => {
             // msg is [address, ...args]; the frontend reads { address, args }.
-            // We expect something like ['/row', 123]
-            console.log(`OSC IN: ${msg}`);
+            // We expect something like ['/row', 123]. /routing/* is the audio computer's
+            // telemetry, many messages a second, so it isn't logged.
+            if (!String(msg[0]).startsWith('/routing/')) console.log(`OSC IN: ${msg}`);
             broadcast({ type: 'OSC_MSG', payload: { address: msg[0], args: msg.slice(1) } });
         });
     } catch (e) {

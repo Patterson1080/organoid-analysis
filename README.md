@@ -255,7 +255,53 @@ ln -s ~/Developer/Fabrication/PDE_SimulacraNaturae/data/organoid/time_series_dat
 
 The bridge reads both at startup (about a second for the 612 MB matrix) and serves them to the page (`http://127.0.0.1:8080/data/`, local pages only), which loads them on connect when nothing was uploaded. A manual upload still works for other datasets. `data/` is gitignored.
 
+Two optional files feed the routing view in the SHOW panel: EoC's firing blob (the normalized rates EoC actually reads) and the vessel's G-code. Without them the Visual card falls back to spikes and the Fabrication card says the G-code is missing.
+
+```bash
+ln -s ~/Developer/Graphics/EoC-biomes-compute/Assets/StreamingAssets/biomes11/organoid_firing.f16 data/organoid_firing.f16
+ln -s ~/Developer/Fabrication/PDE_SimulacraNaturae/data/gcodes/single-object-436666.gcode data/vessel.gcode
+```
+
+Incoming `/routing/*` OSC (the audio computer's telemetry for the routing view) isn't logged by the bridge.
+
 EoC needs the `/sim_off` · `/sim_on` handlers from its `show-sim-off` branch.
+
+### Routing view
+
+The SHOW panel also shows where the show's signal goes and how each medium maps it, live, under the timeline. It's meant for visitors and for talks. Each card states its route and how sure it is: exact, **≈ computed** from the spikes, **SIMULATED**, or **LIVE** from the audio computer.
+
+The organoid sits in the centre, lit by its spikes on the playhead (the show's `/index`, or local playback), with the attribution line under it. The bridge feeds three media directly:
+
+| Card | Signal → medium | Source |
+|---|---|---|
+| Visual · EoC-biomes | `/index` over OSC :1234 selects a row of EoC's firing blob, the normalized rates. A neuron at ≥ 0.1 excites its agents in physarum (1M), boids (20k) and termites (131): speed and deposit. Firing termites stamp Dispersal, which the others flee. | the blob itself, when `data/organoid_firing.f16` is linked; else spikes (the card says so) |
+| LED | `ledStep` → `SERIAL_SYNC` → `F:x,y` / `C:x,y` (≤ 10 a frame, 115200) → two 16×16 matrices → fiber optics | exact: the frame the page computed last |
+| Fabrication | the vessel was grown from this recording before the show; the card shows the layer grown at this point of the recording | the real G-code (`data/vessel.gcode`), layer ≈ linear in the index |
+
+The audio computer's Max patch handles the other three:
+
+| Card | Signal → medium | Source |
+|---|---|---|
+| Sound | `/index` over OSC; the patch reads the matrix, and population rate and burst ends drive density and harmonic changes (SIGGRAPH 2026). The tone, grain and kick mappings shown are VISAP 2025's. | ≈ computed from spikes |
+| Solenoids | 27 backbone neurons → 27 strikers in the vessels and glassware | ≈ computed from backbone spikes |
+| Robot | three arms hung upside down; visitor proximity and touch move the servos and go to Max over serial, into the sound | SIMULATED until telemetry arrives |
+
+**Using it:**
+- **Details:** tap or click a card for its detail: the story drawn large, the signal chain with live values, and a rail of all six to step between. `× ROUTING`, or a tap on the story, returns to the overview.
+- **Tour:** when nobody touches the page, it tours by itself, 20 s per stop: the overview, then each medium. Any click, key or scroll pauses it (`TOUR PAUSED · 0:42`), and 60 s of quiet restarts it at the overview.
+- **Operator controls** (hidden in ⛶ PRESENT): show/hide, tour on/off, and **VISUAL OUT**, which picks what happens to Unity's output this show (direct, TouchDesigner projection mapping, or mapping plus StreamDiffusion). They're kept per browser.
+- **Presentation:** the routing view takes the rest of the screen below the timeline, in any shape. Landscape screens put the bridge-fed media left of the organoid and the audio computer right; portrait screens stack them above and below.
+
+**Telemetry from the audio computer** (not sent yet). The cards switch to **LIVE** when Max sends these to the show machine's OSC input (UDP 3333), and fall back after 2 s of silence. The bridge doesn't log them.
+
+| Address | Args |
+|---|---|
+| `/routing/sound/rate` | float: spikes per 100 ms, the unit the card computes in |
+| `/routing/sound/burst` | 0/1 |
+| `/routing/sound/harmony` | int: the harmonic step |
+| `/routing/sound/tones` · `/grains` · `/kick` | float: events/s |
+| `/routing/solenoid` | slot 0–26 (the k-th backbone neuron in `neurons.csv` row order) [, velocity 0–1] |
+| `/routing/robot/<1-3>/proximity` (cm) · `/servo` (°) · `/touch` (0/1) | float |
 
 ## Spout Output
 

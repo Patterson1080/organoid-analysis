@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { ShowConfig, ShowState, SpikeEvent } from '../types';
+import type { Neuron, ShowConfig, ShowState, SpikeEvent } from '../types';
+import type { LedFrame } from '../show/ledFrame';
 import { cueLabel, cyclePosition, extrapolateIndex, formatClock, lowerBound, phaseRemainingMs, rateBins } from '../show/showMath';
+import type { FiringBlob } from '../show/routing/firingBlob';
+import type { Telemetry } from '../show/routing/telemetry';
+import type { Vessel } from '../show/routing/vessel';
+import { RoutingView } from './RoutingView';
 
 export interface ShowStateSnapshot {
     state: ShowState;
@@ -15,15 +20,21 @@ interface ShowPanelProps {
     connected: boolean;
     onStart: (config: ShowConfig) => void;
     onStop: () => void;
-    presentation?: boolean;   // read-only: no start/stop or config fields, taller raster
+    presentation?: boolean;   // read-only: no start/stop or config fields; the routing view takes the rest of the screen
+    // The routing view below the timeline
+    neurons: Neuron[];
+    playbackTimeRef: React.MutableRefObject<number>;   // local playback, when no show runs
+    ledFrameRef: React.MutableRefObject<LedFrame | null>;
+    telemetryRef: React.MutableRefObject<Telemetry>;
+    firingBlob: FiringBlob | null;
+    vessel: Vessel | null;
 }
 
 const RASTER_HALF_MS = 1000;   // raster shows ±1 s of data around the playhead
 const OVERVIEW_H = 64;
 const TICKS_H = 14;
 const CYCLE_H = 10;
-const RASTER_H = 160;
-const PRESENTATION_RASTER_SHARE = 0.3;   // of the viewport height, at least RASTER_H
+const RASTER_H = 160;   // in presentation too: the routing view below gets the rest of the screen
 const GAP = 8;
 const ALPHA_BUCKETS = 5;   // raster dots batched into Path2Ds by distance from the playhead
 
@@ -63,13 +74,12 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
-export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false }: ShowPanelProps) {
+export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false, neurons, playbackTimeRef, ledFrameRef, telemetryRef, firingBlob, vessel }: ShowPanelProps) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
-    const [fitRasterH, setFitRasterH] = useState(RASTER_H);
-    const rasterH = presentation ? fitRasterH : RASTER_H;
+    const rasterH = RASTER_H;
     const [form, setForm] = useState<FormValues | null>(null);
     const [stopArmed, setStopArmed] = useState(false);
     const running = !!showState?.running;
@@ -96,14 +106,6 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
-
-    useEffect(() => {
-        if (!presentation) return;
-        const fit = () => setFitRasterH(Math.max(RASTER_H, Math.round(window.innerHeight * PRESENTATION_RASTER_SHARE)));
-        fit();
-        window.addEventListener('resize', fit);
-        return () => window.removeEventListener('resize', fit);
-    }, [presentation]);
 
     // Whole-recording firing-rate strip, rendered once per dataset/range/width.
     const startIndex = config?.startIndex ?? 0;
@@ -293,6 +295,18 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
                 style={{ fontFamily: 'var(--font-mono)', fontSize: presentation ? '15px' : '12px', letterSpacing: '0.06em', marginBottom: 'var(--space-sm)', minHeight: '1.4em' }}
             />
             <canvas ref={canvasRef} style={{ display: 'block' }} />
+            <RoutingView
+                neurons={neurons}
+                spikes={spikes}
+                showLatestRef={latestRef}
+                playbackTimeRef={playbackTimeRef}
+                ledFrameRef={ledFrameRef}
+                telemetryRef={telemetryRef}
+                firingBlob={firingBlob}
+                vessel={vessel}
+                connected={connected}
+                presentation={presentation}
+            />
             {!presentation && <div className="flex" style={{ gap: 'var(--space-md)', flexWrap: 'wrap', marginTop: 'var(--space-md)' }}>
                 {field('Start idx', 'startIndex')}
                 {field('End idx', 'endIndex')}
