@@ -51,11 +51,11 @@ Deploy from your PC (pushes nothing; it ships what is on `origin/pi`):
 
 ```bash
 git push                                  # from the pi worktree
-npm run deploy:pi -- --install-service    # first time: clones on the Pi, installs, runs at login
+npm run deploy:pi -- --install-service    # first time: clones on the Pi, installs, runs at login, adds the desktop icon
 npm run deploy:pi                         # after that: pull, npm ci if the lockfile changed, restart
 ```
 
-Set `PI_HOST` (default `pi@raspberrypi.local`), `PI_DIR` (default `organoid-analysis`, under the Pi's home) or `PI_BRANCH` (default `pi`) to change the target; `-- --dry-run` prints the script it runs on the Pi. The service (`scripts/pi/organoid-analysis.service`) runs `npm start`: the bridges plus the page at http://localhost:5173 on the Pi. Logs: `journalctl --user -u organoid-analysis -f`. To start it at boot without a login: `sudo loginctl enable-linger $USER`. For quick iteration, VS Code Remote-SSH edits and runs the Pi checkout directly; commit to `pi` from there, then the next deploy fast-forwards (it stops if the Pi checkout has diverged).
+Set `PI_HOST` (default `pi@raspberrypi.local`), `PI_DIR` (default `organoid-analysis`, under the Pi's home) or `PI_BRANCH` (default `pi`) to change the target; `-- --dry-run` prints the script it runs on the Pi. The service (`scripts/pi/organoid-analysis.service`) runs `npm start`: the bridges plus the page at http://localhost:5173 on the Pi. Logs: `journalctl --user -u organoid-analysis -f`. To start it at boot without a login: `sudo loginctl enable-linger $USER`. The **Organoid Analysis** icon (Desktop and app menu, `scripts/pi/launch.sh`) starts the service if it isn't running, waits for the page, and opens it in its own Chromium window; closing the window leaves the bridges running. For quick iteration, VS Code Remote-SSH edits and runs the Pi checkout directly; commit to `pi` from there, then the next deploy fast-forwards (it stops if the Pi checkout has diverged).
 
 ---
 

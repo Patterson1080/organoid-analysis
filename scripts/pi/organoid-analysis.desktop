@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Organoid Analysis
+Comment=Start the OSC and serial bridges and open the app
+Exec=__DIR__/scripts/pi/launch.sh
+Icon=__DIR__/scripts/pi/organoid-analysis.svg
+Terminal=false
+Categories=Science;

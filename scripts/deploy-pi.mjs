@@ -1,7 +1,7 @@
 // Deploys a branch (default `pi`) to a Raspberry Pi over SSH. Runs on any machine with an
 // ssh client (Windows 10+, macOS, Linux):
 //   npm run deploy:pi
-//   npm run deploy:pi -- --install-service   (first time: run it at login as a user service)
+//   npm run deploy:pi -- --install-service   (first time: user service at login, desktop icon)
 //   npm run deploy:pi -- --dry-run           (print the script it would run on the Pi)
 // Settings come from the environment: PI_HOST (default pi@raspberrypi.local), PI_DIR (folder
 // under the Pi's home, default organoid-analysis), PI_BRANCH (default pi). In PowerShell:
@@ -67,6 +67,12 @@ const remote = [
     '    systemctl --user daemon-reload',
     '    systemctl --user enable "$UNIT"',
     '    echo "Installed $UNIT. To start it at boot without logging in: sudo loginctl enable-linger $USER"',
+    // Desktop icon and menu entry (scripts/pi/launch.sh): start the service if needed, open the page.
+    '    APP=organoid-analysis.desktop',
+    '    mkdir -p "$HOME/.local/share/applications" "$HOME/Desktop"',
+    '    sed "s#__DIR__#$PWD#g" "scripts/pi/$APP" > "$HOME/.local/share/applications/$APP"',
+    '    install -m 755 "$HOME/.local/share/applications/$APP" "$HOME/Desktop/$APP"',
+    '    echo "Installed the Organoid Analysis icon on the Desktop and in the menu"',
     'fi',
     'if systemctl --user cat "$UNIT" >/dev/null 2>&1; then',
     '    systemctl --user restart "$UNIT"',
