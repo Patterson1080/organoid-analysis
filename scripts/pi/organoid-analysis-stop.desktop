@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Stop Organoid Analysis
+Comment=Close the app and stop the OSC and serial bridges
+Exec=__DIR__/scripts/pi/stop.sh
+Icon=__DIR__/scripts/pi/organoid-analysis-stop.svg
+Terminal=false
+Categories=Science;
