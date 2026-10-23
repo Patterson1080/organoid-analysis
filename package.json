@@ -18,7 +18,10 @@
     "preview": "vite preview",
     "test": "node --test \"server/**/*.test.js\" \"src/**/*.test.ts\"",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder --win"
+    "electron:build": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:pi": "npm run build && electron-builder --linux --arm64",
+    "deploy:pi": "node scripts/deploy-pi.mjs"
   },
   "build": {
     "appId": "com.organoid.analysis",
@@ -37,6 +40,10 @@
     },
     "mac": {
       "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Science"
     }
   },
   "dependencies": {

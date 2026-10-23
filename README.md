@@ -30,8 +30,32 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ```bash
 npm run build
-npm run electron:build  # Windows desktop build
+npm run electron:build      # Windows installer (run on Windows)
+npm run electron:build:mac  # macOS .dmg (run on a Mac)
+npm run electron:build:pi   # Linux arm64 AppImage (run on the Pi; needs libfuse2 to launch)
 ```
+
+electron-builder writes to `release/`. Each target is built on its own OS: it can't make a .dmg on Windows, and the Pi build compiles serialport for ARM.
+
+### Raspberry Pi
+
+Desktop work (PC, Mac) happens on `main`. Pi work lives on the long-lived `pi` branch, which takes everything from `main` and adds what only the Pi needs, so `main` is never affected by it.
+
+- **Two folders, one repo.** `pi` is checked out in its own worktree next to the main checkout: `git worktree add ../organoid-analysis-pi pi`.
+- **main → pi, often.** In the pi worktree: `git merge main`. Small, frequent merges stay painless.
+- **pi → main, one commit at a time.** A Pi fix that belongs everywhere goes over with `git cherry-pick <sha>` on `main`. Never merge `pi` into `main`. Once a Pi difference is understood, prefer moving it onto `main` behind a config or platform check, so `pi` stays small.
+
+The Pi needs Node 22.18+ (Raspberry Pi OS's apt Node is older: use NodeSource or nvm), git, and an ssh server. Its user must be in the `dialout` group for the serial bridge (the default user is). The serial bridge finds the Arduino by vendor id, so there's no port to configure.
+
+Deploy from your PC (pushes nothing; it ships what is on `origin/pi`):
+
+```bash
+git push                                  # from the pi worktree
+npm run deploy:pi -- --install-service    # first time: clones on the Pi, installs, runs at login
+npm run deploy:pi                         # after that: pull, npm ci if the lockfile changed, restart
+```
+
+Set `PI_HOST` (default `pi@raspberrypi.local`), `PI_DIR` (default `organoid-analysis`, under the Pi's home) or `PI_BRANCH` (default `pi`) to change the target; `-- --dry-run` prints the script it runs on the Pi. The service (`scripts/pi/organoid-analysis.service`) runs `npm start`: the bridges plus the page at http://localhost:5173 on the Pi. Logs: `journalctl --user -u organoid-analysis -f`. To start it at boot without a login: `sudo loginctl enable-linger $USER`. For quick iteration, VS Code Remote-SSH edits and runs the Pi checkout directly; commit to `pi` from there, then the next deploy fast-forwards (it stops if the Pi checkout has diverged).
 
 ---
 
