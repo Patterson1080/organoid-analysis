@@ -20,4 +20,4 @@ for _ in $(seq 60); do
 done
 curl -s -o /dev/null "$URL" || { say "The page did not come up within 60 s (journalctl --user -u organoid-analysis)"; exit 1; }
 
-exec chromium --app="$URL" --start-maximized --password-store=basic >> "$LOG" 2>&1
+exec chromium --app="$URL" --start-maximized --password-store=basic --ozone-platform-hint=auto >> "$LOG" 2>&1
