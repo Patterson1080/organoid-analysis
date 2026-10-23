@@ -1,0 +1,16 @@
+# systemd user service: runs `npm start` (OSC + serial bridges and the Vite page on :5173).
+# Installed by `npm run deploy:pi -- --install-service`, which points WorkingDirectory at
+# the deployed checkout. Logs: journalctl --user -u organoid-analysis -f
+[Unit]
+Description=Organoid Analysis (bridges + page)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/organoid-analysis
+# Loads nvm when Node was installed with it; NodeSource's node is already on PATH.
+ExecStart=/bin/bash -c 'if [ -s %h/.nvm/nvm.sh ]; then . %h/.nvm/nvm.sh; fi; exec npm start'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
