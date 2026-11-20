@@ -41,6 +41,10 @@ export function createShowRunner({
         timer = null;
         const r = step(prev, config, now() - t0, cues);
         for (const m of r.messages) send(m.address, m.args);
+        if (r.state.done) { // one pass, loop off: the show ends itself, with the stop's off cue
+            stop();
+            return;
+        }
         prev = r.next;
         current = r.state;
         onState(getState());

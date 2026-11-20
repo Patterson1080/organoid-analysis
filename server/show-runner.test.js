@@ -108,3 +108,25 @@ test('at 1000 indices a second a tick 100 ms late still fills every index', () =
     const indices = h.sent.filter(m => m.address === '/index').map(m => m.args[0]);
     assert.deepEqual(indices, Array.from({ length: 101 }, (_, i) => i));
 });
+
+test('with loop off the show plays one pass, sends one off cue and stops itself', () => {
+    const h = harness();
+    h.runner.start({ fps: 60, endIndex: 59, offSeconds: 0, loop: false }); // a 1 s pass
+    for (let i = 0; i < 70 && h.runner.isRunning(); i++) h.fireNext();
+    assert.equal(h.runner.isRunning(), false);
+    assert.equal(h.states.at(-1).phase, 'stopped');
+    const addresses = h.sent.map(m => m.address);
+    assert.equal(addresses.filter(a => a === '/sim_on').length, 1); // no second pass began
+    assert.equal(addresses.filter(a => a === '/sim_off').length, 1);
+    assert.equal(addresses.at(-1), '/sim_off');
+    assert.deepEqual(h.sent.filter(m => m.address === '/index').map(m => m.args[0]), Array.from({ length: 60 }, (_, i) => i));
+});
+
+test('with loop on and no dark time the next pass follows at once', () => {
+    const h = harness();
+    h.runner.start({ fps: 60, endIndex: 59, offSeconds: 0, loop: true });
+    for (let i = 0; i < 70; i++) h.fireNext();
+    assert.equal(h.runner.isRunning(), true);
+    assert.equal(h.states.at(-1).pass, 2);
+    assert.equal(h.sent.filter(m => m.address === '/sim_off').length, 0);
+});

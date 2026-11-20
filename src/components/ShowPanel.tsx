@@ -30,6 +30,7 @@ interface ShowPanelProps {
     connected: boolean;
     onStart: (config: ShowConfig) => void;
     playRate: number;   // indices a second, from the play panel's speed: the show runs at the same rate
+    loop: boolean;      // the play panel's LOOP: off plays one pass and stops
     onStop: () => void;
     presentation?: boolean;   // read-only: no start/stop or config fields; the routing view takes the rest of the screen
     // The routing view below the timeline
@@ -50,6 +51,8 @@ const CYCLE_H = 10;
 const RASTER_H = 160;   // in presentation too: the routing view below gets the rest of the screen
 const GAP = 8;
 const ALPHA_BUCKETS = 5;   // raster dots batched into Path2Ds by distance from the playhead
+
+const BRIDGE_DEFAULT_OFF_S = 120; // server/show-schedule.js
 
 type NumberField = 'startIndex' | 'endIndex' | 'fps' | 'offSeconds' | 'fadeSeconds';
 type FormValues = Record<NumberField, string> & { counts: string[] };
@@ -164,7 +167,7 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
-export function ShowPanel({ spikes, maxNeuronId, compare, rangeMs, showState, latestRef, connected, onStart, onStop, playRate, presentation = false, neurons, playbackTimeRef, ledFramesRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
+export function ShowPanel({ spikes, maxNeuronId, compare, rangeMs, showState, latestRef, connected, onStart, onStop, playRate, loop, presentation = false, neurons, playbackTimeRef, ledFramesRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
@@ -177,7 +180,8 @@ export function ShowPanel({ spikes, maxNeuronId, compare, rangeMs, showState, la
 
     // Seed the form from the bridge: its defaults on first contact, the live config while running.
     useEffect(() => {
-        if (config && (form === null || running)) setForm(toForm(config));
+        // Stopped, the dark period starts at 0 (passes follow at once); the bridge's own default is the installation's.
+        if (config && (form === null || running)) setForm(toForm(running ? config : { ...config, offSeconds: form === null && config.offSeconds === BRIDGE_DEFAULT_OFF_S ? 0 : config.offSeconds }));
     }, [config, running]);
 
     // STOP blacks out the room, so it takes two clicks within 3 s.
@@ -306,7 +310,7 @@ export function ShowPanel({ spikes, maxNeuronId, compare, rangeMs, showState, la
             if (stopArmed) onStop();
             setStopArmed(!stopArmed);
         } else if (config && form) {
-            onStart({ ...fromForm(form, config), fps: playRate });
+            onStart({ ...fromForm(form, config), fps: playRate, loop });
         }
     };
 
@@ -367,7 +371,11 @@ export function ShowPanel({ spikes, maxNeuronId, compare, rangeMs, showState, la
                     Idx / s · play rate
                     <input type="text" readOnly disabled value={`${running && config ? config.fps : playRate} · ${((running && config ? config.fps : playRate) / 1000).toFixed(2)}x`} style={inputStyle} />
                 </label>
-                {field('Off (s)', 'offSeconds')}
+                <label className="data-label" style={labelStyle} title="Set by LOOP in the play panel">
+                    Repeat · LOOP
+                    <input type="text" readOnly disabled value={(running && config ? config.loop !== false : loop) ? 'loops' : 'one pass'} style={inputStyle} />
+                </label>
+                {field('Dark between (s)', 'offSeconds')}
                 {field('Fade (s)', 'fadeSeconds')}
                 {config?.spreadCues.map((c, i) => (
                     <label key={c.address} className="data-label" style={labelStyle}>

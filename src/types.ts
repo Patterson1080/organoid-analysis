@@ -47,6 +47,7 @@ export interface ShowConfig {
     endIndex: number; // inclusive
     fps: number;
     offSeconds: number;
+    loop?: boolean; // false: one pass, then the show stops itself
     fadeSeconds: number;
     indexAddress: string;
     passStartCue: string;
