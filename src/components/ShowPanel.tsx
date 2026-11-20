@@ -14,9 +14,17 @@ export interface ShowStateSnapshot {
     receivedAt: number; // performance.now() when the SHOW_STATE arrived
 }
 
+/** A second dataset drawn under the first (overview strip + raster) on the same playhead, to compare. */
+export interface CompareDataset {
+    spikes: SpikeEvent[];   // sorted by timestamp_ms
+    maxNeuronId: number;
+}
+
 interface ShowPanelProps {
     spikes: SpikeEvent[];   // sorted by timestamp_ms
     maxNeuronId: number;
+    compare: CompareDataset | null;
+    rangeMs: number;   // the strip's range when the bridge hasn't sent a show config
     showState: ShowState | null;   // React copy: changes on start/stop/phase/pass
     latestRef: React.MutableRefObject<ShowStateSnapshot | null>;   // every SHOW_STATE, read per frame
     connected: boolean;
@@ -66,6 +74,83 @@ const fromForm = (f: FormValues, base: ShowConfig): ShowConfig => ({
     spreadCues: base.spreadCues.map((s, i) => ({ address: s.address, count: Number(f.counts[i] ?? s.count) })),
 });
 
+// Whole-recording firing-rate strip, rendered once per dataset/range/width.
+function renderOverview(spikes: SpikeEvent[], startIndex: number, endIndex: number, width: number): HTMLCanvasElement | null {
+    if (spikes.length === 0 || width <= 0 || endIndex <= startIndex) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const bins = rateBins(spikes, startIndex, endIndex, width);
+    let max = 0;
+    for (const v of bins) if (v > max) max = v;
+    const c = document.createElement('canvas');
+    c.width = Math.floor(width * dpr);
+    c.height = Math.floor(OVERVIEW_H * dpr);
+    const g = c.getContext('2d');
+    if (!g || max === 0) return c;
+    g.scale(dpr, dpr);
+    g.fillStyle = '#888888';
+    for (let x = 0; x < bins.length; x++) {
+        if (!bins[x]) continue;
+        const h = Math.max(1, Math.sqrt(bins[x] / max) * (OVERVIEW_H - 2));
+        g.fillRect(x, OVERVIEW_H - h, 1, h);
+    }
+    return c;
+}
+
+// Overview strip at y, with the playhead at x (null: none).
+function drawStrip(ctx: CanvasRenderingContext2D, overview: HTMLCanvasElement | null, y: number, width: number, x: number | null, dim: boolean) {
+    ctx.strokeStyle = '#333';
+    ctx.strokeRect(0.5, y + 0.5, width - 1, OVERVIEW_H - 1);
+    if (overview) ctx.drawImage(overview, 0, y, width, OVERVIEW_H);
+    if (x !== null) {
+        ctx.strokeStyle = dim ? '#555' : '#fff';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + OVERVIEW_H);
+        ctx.stroke();
+    }
+}
+
+// Raster at y: ±1 s of spikes scrolling past a fixed centre playhead.
+function drawRaster(ctx: CanvasRenderingContext2D, spikes: SpikeEvent[], maxNeuronId: number, idx: number | null, y: number, width: number, dim: boolean) {
+    ctx.strokeStyle = '#333';
+    ctx.strokeRect(0.5, y + 0.5, width - 1, RASTER_H - 1);
+    if (idx !== null) {
+        const t0 = idx - RASTER_HALF_MS;
+        const t1 = idx + RASTER_HALF_MS;
+        const yScale = (RASTER_H - 6) / Math.max(1, maxNeuronId);
+        const paths = Array.from({ length: ALPHA_BUCKETS * 2 }, () => new Path2D());
+        for (let i = lowerBound(spikes, t0); i < spikes.length && spikes[i].timestamp_ms <= t1; i++) {
+            const s = spikes[i];
+            const d = Math.min(1, Math.abs(s.timestamp_ms - idx) / RASTER_HALF_MS);
+            const bucket = Math.min(ALPHA_BUCKETS - 1, Math.floor(d * ALPHA_BUCKETS));
+            const x = ((s.timestamp_ms - t0) / (2 * RASTER_HALF_MS)) * width;
+            paths[(s.timestamp_ms <= idx ? 0 : ALPHA_BUCKETS) + bucket].rect(x - 1, y + 2 + s.neuron_id * yScale, 2, 2);
+        }
+        paths.forEach((p, k) => {
+            const bucket = k % ALPHA_BUCKETS;
+            ctx.globalAlpha = (dim ? 0.3 : 1) * (1 - (0.8 * (bucket + 0.5)) / ALPHA_BUCKETS);
+            ctx.fillStyle = k < ALPHA_BUCKETS ? '#fff' : '#888';
+            ctx.fill(p);
+        });
+        ctx.globalAlpha = 1;
+    }
+    const cx = Math.round(width / 2) + 0.5;
+    ctx.strokeStyle = dim || idx === null ? '#555' : '#fff';
+    ctx.beginPath();
+    ctx.moveTo(cx, y);
+    ctx.lineTo(cx, y + RASTER_H);
+    ctx.stroke();
+}
+
+// "A" / "B" in the strip's top-left corner, when two datasets are compared.
+function drawTag(ctx: CanvasRenderingContext2D, tag: string, y: number) {
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(tag, 5, y + 4);
+}
+
 function hudText(st: ShowState | null, since: number, connected: boolean): string {
     if (!connected) return 'BRIDGE OFFLINE · start it with npm start';
     if (!st) return 'WAITING FOR BRIDGE…';
@@ -79,7 +164,7 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
-export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, playRate, presentation = false, neurons, playbackTimeRef, ledFramesRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
+export function ShowPanel({ spikes, maxNeuronId, compare, rangeMs, showState, latestRef, connected, onStart, onStop, playRate, presentation = false, neurons, playbackTimeRef, ledFramesRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
@@ -111,36 +196,24 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
         return () => ro.disconnect();
     }, []);
 
-    // Whole-recording firing-rate strip, rendered once per dataset/range/width.
     const startIndex = config?.startIndex ?? 0;
-    const endIndex = config?.endIndex ?? 0;
-    const overview = useMemo(() => {
-        if (!hasData || width <= 0 || endIndex <= startIndex) return null;
-        const dpr = window.devicePixelRatio || 1;
-        const bins = rateBins(spikes, startIndex, endIndex, width);
-        let max = 0;
-        for (const v of bins) if (v > max) max = v;
-        const c = document.createElement('canvas');
-        c.width = Math.floor(width * dpr);
-        c.height = Math.floor(OVERVIEW_H * dpr);
-        const g = c.getContext('2d');
-        if (!g || max === 0) return c;
-        g.scale(dpr, dpr);
-        g.fillStyle = '#888888';
-        for (let x = 0; x < bins.length; x++) {
-            if (!bins[x]) continue;
-            const h = Math.max(1, Math.sqrt(bins[x] / max) * (OVERVIEW_H - 2));
-            g.fillRect(x, OVERVIEW_H - h, 1, h);
-        }
-        return c;
-    }, [spikes, hasData, width, startIndex, endIndex]);
+    const endIndex = config?.endIndex ?? rangeMs;
+    const overview = useMemo(() => renderOverview(spikes, startIndex, endIndex, width), [spikes, width, startIndex, endIndex]);
+    // The comparison only shows when both datasets are loaded.
+    const compareSpikes = hasData && compare && compare.spikes.length > 0 ? compare.spikes : null;
+    const compareMaxId = compare?.maxNeuronId ?? 1;
+    const overviewB = useMemo(
+        () => (compareSpikes ? renderOverview(compareSpikes, startIndex, endIndex, width) : null),
+        [compareSpikes, width, startIndex, endIndex],
+    );
 
     // Draw loop: reads latestRef every frame, so App never re-renders at frame rate.
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas || width <= 0) return;
         const dpr = window.devicePixelRatio || 1;
-        const height = OVERVIEW_H + TICKS_H + GAP + CYCLE_H + (hasData ? GAP + RASTER_H : 0);
+        const height = OVERVIEW_H + TICKS_H + GAP + CYCLE_H + (hasData ? GAP + RASTER_H : 0)
+            + (compareSpikes ? 2 * GAP + OVERVIEW_H + GAP + RASTER_H : 0);
         canvas.width = Math.floor(width * dpr);
         canvas.height = Math.floor(height * dpr);
         canvas.style.width = `${width}px`;
@@ -167,32 +240,39 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, width, height);
-            if (!st) return;
+            if (!st && !hasData) return;
 
-            const cfg = st.config;
-            const span = Math.max(1, cfg.endIndex - cfg.startIndex);
-            const xOf = (frame: number) => ((frame - cfg.startIndex) / span) * width;
-            const live = extrapolateIndex(st, since);
+            const start = st?.config.startIndex ?? 0;
+            const span = Math.max(1, (st?.config.endIndex ?? rangeMs) - start);
+            const xOf = (frame: number) => ((frame - start) / span) * width;
+            const live = st ? extrapolateIndex(st, since) : null;
             if (live !== null) parked = live;
-            if (!st.running) parked = null;
-            const idx = live ?? parked;
-            const dim = st.phase === 'off';
+            if (!st?.running) parked = null;
+            // The show's index while one runs; otherwise local playback (PLAY, scrubbing, /row).
+            const idx = st?.running ? live ?? parked : hasData ? playbackTimeRef.current : null;
+            const dim = !!st?.running && st.phase === 'off';
+            const playheadX = idx !== null ? Math.round(xOf(idx)) + 0.5 : null;
             ctx.lineWidth = 1;
 
             // 1. Overview strip + playhead
-            ctx.strokeStyle = '#333';
-            ctx.strokeRect(0.5, 0.5, width - 1, OVERVIEW_H - 1);
-            if (overview) ctx.drawImage(overview, 0, 0, width, OVERVIEW_H);
-            if (idx !== null) {
-                const x = Math.round(xOf(idx)) + 0.5;
-                ctx.strokeStyle = dim ? '#555' : '#fff';
-                ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, OVERVIEW_H);
-                ctx.stroke();
-            }
+            drawStrip(ctx, overview, 0, width, playheadX, dim);
+            if (compareSpikes) drawTag(ctx, 'A', 0);
 
-            // 2. Reset cue ticks
+            // 2. Raster: ±1 s of spikes scrolling past a fixed centre playhead
+            const cy = OVERVIEW_H + TICKS_H + GAP;
+            const ry = cy + CYCLE_H + GAP;
+            if (hasData) drawRaster(ctx, spikes, maxNeuronId, idx, ry, width, dim);
+
+            // 3. The comparison dataset: its own strip and raster on the same playhead
+            if (compareSpikes) {
+                const by = ry + RASTER_H + 2 * GAP;
+                drawStrip(ctx, overviewB, by, width, playheadX, dim);
+                drawTag(ctx, 'B', by);
+                drawRaster(ctx, compareSpikes, compareMaxId, idx, by + OVERVIEW_H + GAP, width, dim);
+            }
+            if (!st) return;
+
+            // 4. Reset cue ticks
             ctx.fillStyle = '#888';
             ctx.font = '9px "JetBrains Mono", monospace';
             ctx.textAlign = 'center';
@@ -203,8 +283,7 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
                 ctx.fillText(cueLabel(cue.address), x + 0.5, OVERVIEW_H + 4);
             }
 
-            // 3. Cycle bar: ON | OFF, filled to the current position
-            const cy = OVERVIEW_H + TICKS_H + GAP;
+            // 5. Cycle bar: ON | OFF, filled to the current position
             const onW = (st.timing.passMs / st.timing.cycleMs) * width;
             ctx.fillStyle = 'rgba(255,255,255,0.12)';
             ctx.fillRect(0, cy, onW, CYCLE_H);
@@ -217,42 +296,10 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
                 ctx.fillStyle = '#fff';
                 ctx.fillRect(Math.round(pos * width) - 1, cy - 2, 2, CYCLE_H + 4);
             }
-
-            // 4. Raster: ±1 s of spikes scrolling past a fixed centre playhead
-            if (!hasData) return;
-            const ry = cy + CYCLE_H + GAP;
-            ctx.strokeStyle = '#333';
-            ctx.strokeRect(0.5, ry + 0.5, width - 1, RASTER_H - 1);
-            if (idx !== null) {
-                const t0 = idx - RASTER_HALF_MS;
-                const t1 = idx + RASTER_HALF_MS;
-                const yScale = (RASTER_H - 6) / Math.max(1, maxNeuronId);
-                const paths = Array.from({ length: ALPHA_BUCKETS * 2 }, () => new Path2D());
-                for (let i = lowerBound(spikes, t0); i < spikes.length && spikes[i].timestamp_ms <= t1; i++) {
-                    const s = spikes[i];
-                    const d = Math.min(1, Math.abs(s.timestamp_ms - idx) / RASTER_HALF_MS);
-                    const bucket = Math.min(ALPHA_BUCKETS - 1, Math.floor(d * ALPHA_BUCKETS));
-                    const x = ((s.timestamp_ms - t0) / (2 * RASTER_HALF_MS)) * width;
-                    paths[(s.timestamp_ms <= idx ? 0 : ALPHA_BUCKETS) + bucket].rect(x - 1, ry + 2 + s.neuron_id * yScale, 2, 2);
-                }
-                paths.forEach((p, k) => {
-                    const bucket = k % ALPHA_BUCKETS;
-                    ctx.globalAlpha = (dim ? 0.3 : 1) * (1 - (0.8 * (bucket + 0.5)) / ALPHA_BUCKETS);
-                    ctx.fillStyle = k < ALPHA_BUCKETS ? '#fff' : '#888';
-                    ctx.fill(p);
-                });
-                ctx.globalAlpha = 1;
-            }
-            const cx = Math.round(width / 2) + 0.5;
-            ctx.strokeStyle = dim || idx === null ? '#555' : '#fff';
-            ctx.beginPath();
-            ctx.moveTo(cx, ry);
-            ctx.lineTo(cx, ry + RASTER_H);
-            ctx.stroke();
         };
         raf = requestAnimationFrame(draw);
         return () => cancelAnimationFrame(raf);
-    }, [width, spikes, hasData, overview, maxNeuronId, connected, latestRef]);
+    }, [width, spikes, hasData, overview, maxNeuronId, compareSpikes, overviewB, compareMaxId, rangeMs, connected, latestRef, playbackTimeRef]);
 
     const handleButton = () => {
         if (running) {

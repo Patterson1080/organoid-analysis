@@ -87,6 +87,12 @@ function App() {
 
     const allSpikesRef = useRef<SpikeEvent[]>([]);
 
+    // Dataset B, to compare against the main one (A) in the SHOW panel on the same playhead.
+    // Display only: OSC, sound and LEDs follow A.
+    const [neuronsB, setNeuronsB] = useState<Neuron[]>([]);
+    const [spikesB, setSpikesB] = useState<SpikeEvent[]>([]);
+    const [uploaderBKey, setUploaderBKey] = useState(0); // bumped to reset B's uploader on clear
+
     // Time State
     const [startTime, setStartTime] = useState(0);
     const [endTime, setEndTime] = useState(180000); // Default to 180s
@@ -461,6 +467,18 @@ function App() {
         () => neurons.reduce((m, n) => Math.max(m, n.neuron_id), 0) || 131,
         [neurons],
     );
+
+    // B shows once both its files are loaded.
+    const compareB = useMemo(() => {
+        if (neuronsB.length === 0 || spikesB.length === 0) return null;
+        const maxId = neuronsB.reduce((m, n) => Math.max(m, n.neuron_id), 0);
+        return { spikes: spikesB, maxNeuronId: maxId };
+    }, [neuronsB, spikesB]);
+    const clearB = () => {
+        setNeuronsB([]);
+        setSpikesB([]);
+        setUploaderBKey(k => k + 1);
+    };
 
     const handleNeuronsLoaded = (loadedNeurons: Neuron[]) => {
         const bounds = neuronBounds(loadedNeurons);
@@ -968,6 +986,22 @@ function App() {
                         {bridgeDataStatus && (
                             <div className="status-text" style={{ marginTop: 'var(--space-sm)' }}>{bridgeDataStatus}</div>
                         )}
+                        <div style={{ marginTop: 'var(--space-md)' }}>
+                            <FileUploader
+                                key={uploaderBKey}
+                                title="Compare (B)"
+                                onNeuronsLoaded={setNeuronsB}
+                                onSpikesLoaded={s => setSpikesB([...s].sort((a, b) => a.timestamp_ms - b.timestamp_ms))}
+                            />
+                            <div className="flex justify-between items-center" style={{ marginTop: 'var(--space-sm)' }}>
+                                <div className="status-text">
+                                    {compareB ? 'B shows under A in the SHOW panel' : 'Load both files to compare under A'}
+                                </div>
+                                {(neuronsB.length > 0 || spikesB.length > 0) && (
+                                    <button className="btn" onClick={clearB}>✕ Clear B</button>
+                                )}
+                            </div>
+                        </div>
                     </div>
 
                     {/* Time Filter & Playback Controls */}
@@ -1467,6 +1501,8 @@ function App() {
                             <ShowPanel
                                 spikes={allSpikesRef.current}
                                 maxNeuronId={maxNeuronId}
+                                compare={compareB}
+                                rangeMs={maxTime}
                                 showState={showState}
                                 latestRef={showLatestRef}
                                 connected={wsConnected}

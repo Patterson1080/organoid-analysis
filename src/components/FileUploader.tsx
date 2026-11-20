@@ -5,9 +5,10 @@ import { Neuron, SpikeEvent } from '../types';
 interface FileUploaderProps {
     onNeuronsLoaded: (neurons: Neuron[]) => void;
     onSpikesLoaded: (spikes: SpikeEvent[]) => void;
+    title?: string;
 }
 
-export const FileUploader: React.FC<FileUploaderProps> = ({ onNeuronsLoaded, onSpikesLoaded }) => {
+export const FileUploader: React.FC<FileUploaderProps> = ({ onNeuronsLoaded, onSpikesLoaded, title = 'Data Input' }) => {
     const [neuronFile, setNeuronFile] = useState<File | null>(null);
     const [spikeFile, setSpikeFile] = useState<File | null>(null);
     const [dragActiveNeuron, setDragActiveNeuron] = useState(false);
@@ -93,7 +94,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onNeuronsLoaded, onS
 
     return (
         <div className="data-panel">
-            <h2 style={{ marginBottom: 'var(--space-lg)' }}>Data Input</h2>
+            <h2 style={{ marginBottom: 'var(--space-lg)' }}>{title}</h2>
 
             <div className="grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
                 {/* Neuron Location Upload */}

@@ -183,6 +183,10 @@ The transport panel uses a unified 4×2 button grid with no gap between rows:
 
 **Target Playback Duration** controls playback speed: the data window is stretched or compressed to fit the target duration. Setting 750 s produces a 0.24× slow-motion render of a 180 s dataset.
 
+### Comparing two datasets
+
+Load a second neuron + spike file pair in **Compare (B)**, under Data Input, e.g. baseline as A and ketamine as B. Once both of B's files are loaded, the SHOW panel draws B's firing-rate strip and raster under A's, tagged A and B, on the same playhead: PLAY, scrubbing or a running show move both. B is display only; OSC, sound and LEDs follow A. `✕ Clear B` goes back to one graph.
+
 ### Presentation View
 
 `⛶ PRESENT` (top right) shows only the open visualizations, fullscreen when the browser allows it. The header, data loading, transport, settings and OSC panels, and each view's export/settings buttons are hidden; titles, HUDs, legends and stats stay. Wide views (show panel, real-time graph) come first at full width; the other views follow as tiles, 3 per row on a 1920 px screen and 4 on 2560 (`--pres-tile` in `src/index.css`): 3D maps, PCA, circular graphs, neural web, hypergraphs, and Activity Analysis split into separate Network Activity, Top 20 Neurons, Spike Raster and Heatmaps tiles. Hover a tile and click its corner control to make it span 1 column, 2 or the full row; charts, the raster and 3D scenes get wider, not taller. Each tile's span is remembered in that browser. The page scrolls when the views don't fit one screen. Space and ←/→ still drive playback.
