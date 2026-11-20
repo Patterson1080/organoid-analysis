@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFeatureTracker, monitorsApartFrom, parseDestinations, positionMessages } from './monitor.js';
+import { createFeatureTracker, monitorsApartFrom, parseDestinations, positionMessages, safeMessages } from './monitor.js';
 import { spikesInWindow } from './show-data.js';
 
 // Frames from a list of spike counts per ms (which neuron fires doesn't matter here).
@@ -38,19 +38,25 @@ test('spikesInWindow counts (index − window, index], clipped to the recording'
     assert.equal(spikesInWindow(frames, -1), 0);
 });
 
-test('the tracker sends the rate at the index and flags a burst end once, even on a late tick', () => {
+test('the tracker sends the rate, a burst end once (even on a late tick), and whether one is in progress', () => {
     // 300 quiet ms, a 10 ms burst of 10 spikes/ms, then quiet: the 100 ms rate peaks at 100, so a
     // burst is rate >= 20, from the 2nd burst ms until 100 ms after it thins out.
     const counts = [...Array(300).fill(0), ...Array(10).fill(10), ...Array(300).fill(0)];
     const t = createFeatureTracker(framesOf(counts));
     assert.equal(t.peak, 100);
-    assert.deepEqual(t.step(-1, 299), [{ address: '/feature/rate', args: [0] }, { address: '/feature/burst', args: [0] }]);
-    assert.deepEqual(t.step(299, 305).map(m => m.args[0]), [60, 0]);
+    assert.deepEqual(t.step(-1, 299), [{ address: '/feature/rate', args: [0] }, { address: '/feature/burst', args: [0] }, { address: '/feature/bursting', args: [0] }]);
+    assert.deepEqual(t.step(299, 305).map(m => m.args[0]), [60, 0, 1]);
     // One late tick that covers the whole decay still reports the end.
-    assert.deepEqual(t.step(305, 420).map(m => m.args[0]), [0, 1]);
-    assert.deepEqual(t.step(420, 421).map(m => m.args[0]), [0, 0]);
+    assert.deepEqual(t.step(305, 420).map(m => m.args[0]), [0, 1, 0]);
+    assert.deepEqual(t.step(420, 421).map(m => m.args[0]), [0, 0, 0]);
     // A new pass starts outside a burst.
     t.step(421, 305);
     t.reset();
-    assert.deepEqual(t.step(-1, 0).map(m => m.args[0]), [0, 0]);
+    assert.deepEqual(t.step(-1, 0).map(m => m.args[0]), [0, 0, 0]);
+});
+
+test("a page's monitor messages are kept only when well formed", () => {
+    const good = [{ address: '/feature/firing', args: [3] }, { address: '/show/phase', args: ['on'] }];
+    assert.deepEqual(safeMessages([...good, { address: 'x', args: [1] }, { address: '/a', args: [NaN] }, { address: '/a', args: [{}] }, null, { address: '/a' }]), good);
+    assert.deepEqual(safeMessages(undefined), []);
 });

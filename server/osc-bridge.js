@@ -10,7 +10,8 @@ import { isLocalHost, isLocalOrigin } from './local-origin.js';
 import { dataRoutes, dataStatus } from './data-files.js';
 import { loadNeurons, loadSpikeFrames, spikeIdsBetween } from './show-data.js';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from '../src/show/ledFrame.ts';
-import { createFeatureTracker, monitorsApartFrom, parseDestinations, positionMessages } from './monitor.js';
+import { createFeatureTracker, monitorsApartFrom, parseDestinations, positionMessages, safeMessages } from './monitor.js';
+import { backboneIds, firingSignals, ledSignal, showSignals } from '../src/show/monitorSignals.ts';
 
 // Default Configuration
 // The three ports are fixed for the page; the smoke test moves them (scripts/show-smoke.mjs)
@@ -37,6 +38,7 @@ let oscDestinations = []; // { ip, port } of each client, for the show HUD
 let monitorClients = [];
 let monitorDestinations = [];
 let oscMonitorIp = '';
+let announced = ''; // the pass and phase the monitors were last told (/show/pass, /show/phase)
 let wsServer;
 let oscInPort = DEFAULT_OSC_IN_PORT;
 let oscOutPort = DEFAULT_OSC_OUT_PORT;
@@ -66,6 +68,7 @@ let oscOut = {
 const show = createShowRunner({
     send: sendToAll,
     onState: state => {
+        announceShow(state);
         driveFromData(state);
         broadcastShowState();
     },
@@ -183,7 +186,9 @@ async function loadShowData() {
     showData = {
         neuronById: neuronsById(neurons), bounds: neuronBounds(neurons) ?? { minX: 0, maxX: 1, minY: 0, maxY: 1 }, frames,
         features: createFeatureTracker(frames),
+        backbone: backboneIds(neurons),
     };
+    if (!showData.backbone) console.log(`${NEURONS_CSV} marks no backbone neurons: the monitors get no /feature/backbone`);
     console.log(`Show data: ${neurons.length} neurons, ${frames.frameCount} frames, ${frames.ids.length} spikes ` +
         `(${((Date.now() - t0) / 1000).toFixed(1)} s) — LEDs driven by the bridge`);
     broadcastShowState();
@@ -219,13 +224,24 @@ function driveFromData(state) {
     const after = showOutputAfter(lastLedIndex, state.index, state.config.startIndex);
     lastLedIndex = state.index;
     if (state.index <= after) return;
-    const { trail, frame } = ledStep(ledTrail, spikeIdsBetween(showData.frames, after, state.index), showData.neuronById, showData.bounds);
+    const spikeIds = spikeIdsBetween(showData.frames, after, state.index);
+    const { trail, frame } = ledStep(ledTrail, spikeIds, showData.neuronById, showData.bounds);
     ledTrail = trail;
     if (frame && serialLink) serialLink.send(JSON.stringify({ type: 'SERIAL_SYNC', payload: frame }));
     const features = showData.features.step(after, state.index); // stepped every tick, heard or not
     if (monitorClients.length === 0) return;
     const positions = oscOut.neuronsEnabled ? positionMessages(trail, oscOut.xPrefix, oscOut.yPrefix) : [];
-    for (const m of [...positions, ...features]) sendTo(monitorClients, m.address, m.args);
+    const signals = [...features, ...firingSignals(spikeIds, showData.backbone), ...ledSignal(frame)];
+    for (const m of [...positions, ...signals]) sendTo(monitorClients, m.address, m.args);
+}
+
+// The monitors are told the pass and phase when either changes, and again when the monitor
+// list changes, so one that joins late learns where the show is.
+function announceShow(state = show.getState()) {
+    const key = `${state.pass} ${state.phase}`;
+    if (key === announced || monitorClients.length === 0) return;
+    announced = key;
+    for (const m of showSignals(state)) sendTo(monitorClients, m.address, m.args);
 }
 
 // Initialize OSC Server (Inbound)
@@ -271,6 +287,8 @@ function updateOscClients(ipString, port) {
         console.log(`OSC monitor ready at ${ip}:${p}`);
         return new Client(ip, p);
     });
+    announced = '';
+    announceShow();
 }
 
 function updateOscConfig(config) {
@@ -363,6 +381,9 @@ function sendOscBundle(bundle) {
     if (oscClients.length + monitorClients.length === 0) return;
 
     console.log('Sending Bundle:', bundle); // Debug Log
+
+    // The page's signals for the monitors (src/show/monitorSignals.ts): never to the outputs.
+    for (const m of safeMessages(bundle.monitor)) sendTo(monitorClients, m.address, m.args);
 
     [...oscClients, ...monitorClients].forEach(client => {
         // Send Time (row index)

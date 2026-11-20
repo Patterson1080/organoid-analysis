@@ -46,7 +46,21 @@ export function loadOscSettings(storage?: KeyValueStore): OscSettings {
     } catch {
         // Unreadable or blocked storage: defaults.
     }
-    return out;
+    return listenerAsMonitor(out);
+}
+
+const LISTENER_PORT = '3334'; // Kybyria's OSC input
+
+/** Settings saved before monitors existed list a listener as an output, which would send it the
+ *  show twice over and none of the monitor signals. With no monitor set, an output on the
+ *  listener's port becomes the monitor, and the outputs fall back to the default if none is left. */
+export function listenerAsMonitor(settings: OscSettings): OscSettings {
+    if (settings.oscMonitorIp.trim() !== '') return settings;
+    const entries = settings.oscOutIp.split(',').map(s => s.trim()).filter(Boolean);
+    const listeners = entries.filter(e => e.split(':')[1] === LISTENER_PORT);
+    if (listeners.length === 0) return settings;
+    const outputs = entries.filter(e => !listeners.includes(e));
+    return { ...settings, oscOutIp: outputs.join(', ') || DEFAULT_OSC_SETTINGS.oscOutIp, oscMonitorIp: listeners.join(', ') };
 }
 
 export function saveOscSettings(settings: OscSettings, storage?: KeyValueStore): void {

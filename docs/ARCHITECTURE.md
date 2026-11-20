@@ -44,6 +44,25 @@ ShowPanel ──SHOW_START{config} / SHOW_STOP──▶ osc-bridge.js ──UDP�
 
 Cycle: `/sim_resetSimsOnly`, `/sim_on 5` → `/index` 0→179999 at 60/s (+5 termite, 10 physarum resets) → `/sim_off 5` → 120 s silence. EoC side: `SimulationManager.SetOutputOn` (master composite level, `pauseWhenDark`), on its `show-sim-off` branch.
 
+## Monitor signals
+
+What a monitor (`oscMonitorIp`) gets beyond the outputs' messages. Addresses and the per-tick rules are in `src/show/monitorSignals.ts`, shared by the bridge (the show) and the page (local playback); the burst tracker is in `server/monitor.js`. Counts are counts, not normalised. A tick is one show-clock tick (60 a second at most) or one local-playback frame, and covers the indices since the last.
+
+| Address | Argument | Meaning | Show | Local playback |
+|---|---|---|---|---|
+| `/x1` `/y1` … `/x5` `/y5` | float each | The five most recently fired neurons' own positions, oldest first (follows the X/Y toggle and prefixes) | every tick | every frame |
+| `/feature/rate` | int | Spikes in the 100 ms up to the index | every tick | every frame |
+| `/feature/bursting` | int 0 or 1 | 1 while the rate is at or above 20 % of the recording's peak | every tick | every frame |
+| `/feature/burst` | int 0 or 1 | 1 on the tick a burst ends | every tick | not sent |
+| `/feature/firing` | int | Distinct neurons that fired in the tick | every tick | every frame |
+| `/feature/backbone` | int | Distinct backbone neurons among them: the neurons `neurons.csv` marks (27 in the show recording, the solenoids' set). Not sent, with a log line, when it marks none | every tick | every frame |
+| `/routing/led` | int | Points in the LED frame (`ledStep`) | ticks that build a frame | frames that build one |
+| `/show/pass` | int | The pass number; 0 when stopped | on change, and when the monitor list changes | not sent |
+| `/show/phase` | string | `on`, `off` or `stopped` | with `/show/pass` | not sent |
+| `/routing/*` | as received | Inbound telemetry (the arms), relayed | as it arrives | as it arrives |
+
+The show's features need `data/`; without it a monitor gets the index, the cues and the show state only.
+
 ## Routing view
 
 A depiction of where the signal goes, inside the SHOW panel; it only reads, and never sends OSC, serial or sound.

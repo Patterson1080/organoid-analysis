@@ -201,6 +201,19 @@ if (xs.length < 30 || xs.length !== ys.length || xs.some((m, i) => m.args[0] + y
 if (heard('/x5').length < 25 || heard('/x6').length !== 0) fail('the trail should send /x1 to /x5');
 const rates = heard('/feature/rate').map(m => m.args[0]);
 if (rates.length < 30 || rates.at(-1) !== 67 || heard('/feature/burst').length !== rates.length) fail(`features: ${rates.length} rates, last ${rates.at(-1)}`);
+// Every tick: neurons that fired (1 a ms here, all 8 at ms 30); the backbone ones among them
+// (the parser reads this dataset's neuron 1 as backbone); bursting; the LED frame's points.
+const firing = heard('/feature/firing').map(m => m.args[0]);
+if (firing.length !== rates.length || Math.max(...firing) !== 8 || firing.some(n => n < 1)) fail(`firing ${firing.length}, max ${Math.max(...firing)}`);
+const backbone = heard('/feature/backbone').map(m => m.args[0]);
+if (backbone.length !== rates.length || Math.max(...backbone) !== 1) fail(`backbone ${backbone.length}, max ${Math.max(...backbone)}`);
+if (heard('/feature/bursting').length !== rates.length) fail(`bursting ${heard('/feature/bursting').length}`);
+const led = heard('/routing/led').map(m => m.args[0]);
+if (led.length !== ledFrames.length || Math.max(...led) < 8) fail(`/routing/led ${led.length} for ${ledFrames.length} frames`);
+// The pass and phase, told when the monitor is added (stopped) and at every change after.
+const phases = heard('/show/phase').map(m => m.args[0]).join();
+const passes = heard('/show/pass').map(m => m.args[0]).join();
+if (phases !== 'stopped,on,off,stopped' || passes !== '0,1,1,0') fail(`phases ${phases}, passes ${passes}`);
 const arm = heard('/routing/robot/1/proximity');
 if (arm.length !== 1 || arm[0].args[0] !== 42.5) fail(`relayed arm reading ${JSON.stringify(arm)}`);
 if (heard('/row').length !== 0) fail('inbound /row was relayed to the monitor');

@@ -206,10 +206,12 @@ The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for 
 - **Output IP(s)** — one or more destination IPs, comma-separated, to stream to multiple computers at once: `192.168.1.5, 192.168.1.6:3334`. Append `:port` to a specific IP to override the shared Output Port for just that destination.
 - **Monitor IP(s)** — optional listeners beside the show, in the same form (e.g. `127.0.0.1:3334` for Kybyria). A monitor gets everything the outputs get. During a show it also gets what the outputs never do:
   - `/x1`, `/y1` … `/x5`, `/y5`: the five most recently fired neurons' own positions, as local playback sends them (needs `data/`; follows the X/Y toggle and prefixes);
-  - `/feature/rate` (spikes in the last 100 ms) and `/feature/burst` (1 on the tick a burst ends, else 0), each tick (needs `data/`);
+  - the feature, LED and show-state signals listed under *Monitor signals* in `docs/ARCHITECTURE.md` (`/feature/rate`, `/feature/firing`, `/show/phase` …; the features need `data/`);
   - every incoming `/routing/*` message, relayed as it came (the arms' readings).
 
-  An address that is also an output, or the bridge's own input port, is ignored as a monitor. Without `data/` a monitor gets the index and cues only, and the bridge's log says so.
+  Local playback sends a monitor the positions and most of the same signals, so a listener can be set up without a show.
+
+  An address that is also an output, or the bridge's own input port, is ignored as a monitor. Settings saved before monitors existed, with a listener on port 3334 among the outputs, are read with that listener as the monitor. Without `data/` a monitor gets the index and cues only, and the bridge's log says so.
 
 Settings are saved in the browser and restored on reload.
 

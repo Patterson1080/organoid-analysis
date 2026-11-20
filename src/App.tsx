@@ -17,6 +17,9 @@ import { PresentationTile } from './components/PresentationTile';
 import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
 import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
 import { playRate, spikesBetween } from './show/showMath';
+import { backboneIds, firingSignals, ledSignal, rateSignals } from './show/monitorSignals';
+import type { OscMessage } from './show/monitorSignals';
+import { BURST_FRACTION, peakRate, populationRate } from './show/routing/soundFeatures';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledFrame';
 import { parseFiringBlob } from './show/routing/firingBlob';
 import { queueLedFrame } from './show/routing/live';
@@ -161,6 +164,9 @@ function App() {
     // handleShowState callback; and the last show index whose spikes were emitted.
     const emitFrameOutputsRef = useRef<(spikesInFrame: SpikeEvent[], frameTime: number) => void>(() => {});
     const lastShowIndexRef = useRef<number | null>(null);
+    // The last frame's signals for the bridge's monitors, and the recording's peak rate they need.
+    const monitorSignalsRef = useRef<OscMessage[]>([]);
+    const peakRateRef = useRef(1);
     // The routing view's inputs: every LED frame emitFrameOutputs computes (sent or not), queued for
     // it to drain at its own rate, the audio computer's /routing/* telemetry, and the optional data/
     // files it draws from.
@@ -503,6 +509,7 @@ function App() {
             }
 
             allSpikesRef.current = sortedSpikes;
+            peakRateRef.current = peakRate(sortedSpikes);
 
             // Force 180s range
             const forcedMax = 180000;
@@ -794,6 +801,7 @@ function App() {
     // Side outputs for the spikes fired since the previous frame: the recent-neuron trail
     // (OSC /x /y), click/bass sound and the Arduino LED stream. Fed by local playback and
     // by the show playhead.
+    const backbone = useMemo(() => backboneIds(neurons), [neurons]);
     const emitFrameOutputs = (spikesInFrame: SpikeEvent[], frameTime: number) => {
         const { trail, frame } = ledStep(
             recentFiringNeuronsRef.current,
@@ -803,6 +811,12 @@ function App() {
         );
         recentFiringNeuronsRef.current = trail;
         if (frame) queueLedFrame(ledFramesRef.current, frame, performance.now());
+        // What a monitor also hears in local playback (the bridge sends these itself in a show).
+        monitorSignalsRef.current = [
+            ...rateSignals(populationRate(allSpikesRef.current, frameTime), BURST_FRACTION * peakRateRef.current),
+            ...firingSignals(spikesInFrame.map(s => s.neuron_id), backbone),
+            ...ledSignal(frame),
+        ];
 
         // Play sound for spikes in this frame
         if (soundEnabled && spikesInFrame.length > 0) {
@@ -929,7 +943,8 @@ function App() {
 
                     const payload = {
                         time: rowIndex,
-                        neurons: recentFiringNeuronsRef.current.map(n => ({ x: n.x, y: n.y }))
+                        neurons: recentFiringNeuronsRef.current.map(n => ({ x: n.x, y: n.y })),
+                        monitor: monitorSignalsRef.current,
                     };
 
                     wsRef.current.send(JSON.stringify({

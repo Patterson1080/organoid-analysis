@@ -1,9 +1,10 @@
 import { BURST_FRACTION, stepBurst } from '../src/show/routing/soundFeatures.ts';
+import { SIGNAL } from '../src/show/monitorSignals.ts';
 import { spikesInWindow } from './show-data.js';
 
 // Monitors: apps that listen to the show without being part of it (Kybyria). They get what the
 // show destinations get, plus extras the show destinations never see: the recent neurons'
-// positions, the population rate and burst ends, and the /routing/* telemetry relayed.
+// positions, the signals of src/show/monitorSignals.ts, and the /routing/* telemetry relayed.
 
 const LOOPBACK = ['127.0.0.1', 'localhost', '0.0.0.0', '::1'];
 
@@ -45,6 +46,14 @@ export function monitorsApartFrom(monitors, outputs, inPort, ownAddresses = []) 
 
 /** /x1, /y1 … for the recent-neuron trail, in the form local playback sends: the neurons' own
  *  positions, oldest first. */
+/** A page's own monitor messages (local playback), kept only if they are well formed: an OSC
+ *  address and plain numbers or strings. */
+export function safeMessages(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter(m => m && typeof m.address === 'string' && m.address.startsWith('/') && Array.isArray(m.args)
+        && m.args.every(a => typeof a === 'string' || Number.isFinite(a)));
+}
+
 export function positionMessages(trail, xPrefix, yPrefix) {
     return trail.flatMap((n, i) => [
         { address: `${xPrefix}${i + 1}`, args: [n.x] },
@@ -52,12 +61,10 @@ export function positionMessages(trail, xPrefix, yPrefix) {
     ]);
 }
 
-export const RATE_ADDRESS = '/feature/rate';
-export const BURST_ADDRESS = '/feature/burst';
-
-/** The population rate at the index and whether a burst ended since the last tick, as the
- *  routing view's SOUND fallback computes them (soundFeatures.ts), from the bridge's frames.
- *  step(after, index) covers (after, index]; reset() at a new pass. */
+/** The population rate at the index, whether a burst ended since the last tick and whether one
+ *  is in progress, as the routing view's SOUND fallback computes them (soundFeatures.ts), from
+ *  the bridge's frames. step(after, index) covers (after, index]; reset() at a new pass. In local
+ *  playback the page sends the rate and bursting itself (rateSignals, monitorSignals.ts). */
 export function createFeatureTracker(frames) {
     let peak = 1;
     for (let f = 0; f < frames.frameCount; f++) peak = Math.max(peak, spikesInWindow(frames, f));
@@ -72,8 +79,9 @@ export function createFeatureTracker(frames) {
             const before = burst.ends;
             for (let f = Math.max(0, Math.floor(after) + 1); f <= index; f++) burst = stepBurst(burst, spikesInWindow(frames, f), threshold);
             return [
-                { address: RATE_ADDRESS, args: [spikesInWindow(frames, index)] },
-                { address: BURST_ADDRESS, args: [burst.ends > before ? 1 : 0] },
+                { address: SIGNAL.rate, args: [spikesInWindow(frames, index)] },
+                { address: SIGNAL.burst, args: [burst.ends > before ? 1 : 0] },
+                { address: SIGNAL.bursting, args: [burst.inBurst ? 1 : 0] },
             ];
         },
     };
