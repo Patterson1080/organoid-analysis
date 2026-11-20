@@ -5,6 +5,7 @@ export interface OscSettings {
     oscInPort: string;
     oscOutIp: string;
     oscOutPort: string;
+    oscMonitorIp: string; // listeners beside the show (Kybyria): server/monitor.js
     oscTimeEnabled: boolean;
     oscTimeAddress: string;
     oscNeuronsEnabled: boolean;
@@ -18,6 +19,7 @@ export const DEFAULT_OSC_SETTINGS: OscSettings = {
     oscInPort: '3333',
     oscOutIp: '127.0.0.1',
     oscOutPort: '1234', // EoC-biomes OSCMapping port in the show scenes
+    oscMonitorIp: '',
     oscTimeEnabled: true,
     oscTimeAddress: '/index',
     oscNeuronsEnabled: true,

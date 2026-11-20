@@ -89,3 +89,22 @@ test('stopped state still carries config, cues and timing for the panel', () => 
     assert.equal(s.cues.length, 15);
     assert.equal(s.timing.cycleMs, 3_120_000);
 });
+
+test('at 1000 indices a second the clock ticks 60 times a second and every index is still sent', () => {
+    const h = harness();
+    h.runner.start({ fps: 1000, endIndex: 999, offSeconds: 1 });
+    for (let i = 0; i < 30; i++) h.fireNext(); // half a second
+    const indices = h.sent.filter(m => m.address === '/index').map(m => m.args[0]);
+    assert.equal(h.states.length, 31); // the start and 30 ticks, not 500
+    assert.deepEqual(indices, Array.from({ length: indices.length }, (_, i) => i)); // none skipped
+    assert.ok(indices.length >= 500 && indices.length <= 502, String(indices.length));
+});
+
+test('at 1000 indices a second a tick 100 ms late still fills every index', () => {
+    const h = harness();
+    h.runner.start({ fps: 1000, endIndex: 999, offSeconds: 1 });
+    h.setClock(100);
+    h.fireNext();
+    const indices = h.sent.filter(m => m.address === '/index').map(m => m.args[0]);
+    assert.deepEqual(indices, Array.from({ length: 101 }, (_, i) => i));
+});

@@ -21,6 +21,7 @@ interface ShowPanelProps {
     latestRef: React.MutableRefObject<ShowStateSnapshot | null>;   // every SHOW_STATE, read per frame
     connected: boolean;
     onStart: (config: ShowConfig) => void;
+    playRate: number;   // indices a second, from the play panel's speed: the show runs at the same rate
     onStop: () => void;
     presentation?: boolean;   // read-only: no start/stop or config fields; the routing view takes the rest of the screen
     // The routing view below the timeline
@@ -69,7 +70,7 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     if (!connected) return 'BRIDGE OFFLINE · start it with npm start';
     if (!st) return 'WAITING FOR BRIDGE…';
     const dest = st.destinations.length ? `→ ${st.destinations.join(', ')}` : '→ NO DESTINATION';
-    const tail = `LED ${st.leds ? 'BRIDGE' : 'TAB'} · ${dest}`;
+    const tail = `LED ${st.leds ? 'BRIDGE' : 'TAB'} · ${dest}${st.monitors?.length ? ` · MONITOR ${st.monitors.join(', ')}` : ''}`;
     if (!st.running) return `STOPPED · ${tail}`;
     const left = formatClock(phaseRemainingMs(st, since));
     if (st.phase === 'off') return `PASS ${st.pass} · ■ OFF · ON IN ${left} · ${tail}`;
@@ -78,7 +79,7 @@ function hudText(st: ShowState | null, since: number, connected: boolean): strin
     return `PASS ${st.pass} · ▶ ON · IDX ${idx} / ${end} · OFF IN ${left} · ${tail}`;
 }
 
-export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, presentation = false, neurons, playbackTimeRef, ledFramesRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
+export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected, onStart, onStop, playRate, presentation = false, neurons, playbackTimeRef, ledFramesRef, telemetryRef, firingBlob, vessel, patch, termite }: ShowPanelProps) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const hudRef = useRef<HTMLDivElement>(null);
@@ -258,7 +259,7 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
             if (stopArmed) onStop();
             setStopArmed(!stopArmed);
         } else if (config && form) {
-            onStart(fromForm(form, config));
+            onStart({ ...fromForm(form, config), fps: playRate });
         }
     };
 
@@ -315,7 +316,10 @@ export function ShowPanel({ spikes, maxNeuronId, showState, latestRef, connected
             {!presentation && <div className="flex" style={{ gap: 'var(--space-md)', flexWrap: 'wrap', marginTop: 'var(--space-md)' }}>
                 {field('Start idx', 'startIndex')}
                 {field('End idx', 'endIndex')}
-                {field('Idx / s', 'fps')}
+                <label className="data-label" style={labelStyle} title="Set by Target Playback Duration in the play panel">
+                    Idx / s · play rate
+                    <input type="text" readOnly disabled value={`${running && config ? config.fps : playRate} · ${((running && config ? config.fps : playRate) / 1000).toFixed(2)}x`} style={inputStyle} />
+                </label>
                 {field('Off (s)', 'offSeconds')}
                 {field('Fade (s)', 'fadeSeconds')}
                 {config?.spreadCues.map((c, i) => (

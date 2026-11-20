@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lowerBound, extrapolateIndex, formatClock, rateBins, cyclePosition, phaseRemainingMs, cueLabel, spikesBetween } from './showMath.ts';
+import { playRate, lowerBound, extrapolateIndex, formatClock, rateBins, cyclePosition, phaseRemainingMs, cueLabel, spikesBetween } from './showMath.ts';
 import type { ShowState, SpikeEvent } from '../types';
 
 const spikes: SpikeEvent[] = [10, 20, 20, 30, 1000].map((t, i) => ({ timestamp_ms: t, neuron_id: i }));
@@ -26,6 +26,15 @@ test('extrapolateIndex advances at fps and clamps at the pass end', () => {
     assert.equal(extrapolateIndex({ ...base, index: 179990 }, 10_000), 179999);
     assert.equal(extrapolateIndex({ ...base, phase: 'off', index: null }, 10), null);
     assert.equal(extrapolateIndex({ ...base, running: false }, 10), null);
+});
+
+test('playRate: the play panel\'s speed as indices a second, within the bridge\'s limits', () => {
+    assert.equal(playRate(180000, 180), 1000); // 1x
+    assert.equal(playRate(180000, 3000), 60); // the installation's 50-minute pass
+    assert.equal(playRate(180000, 750), 240);
+    assert.equal(playRate(180000, 10), 1000); // 18x asked: capped at 1x
+    assert.equal(playRate(180000, 0), 1000); // no duration: real time
+    assert.equal(playRate(1000, 3600), 1);
 });
 
 test('formatClock rounds up to whole seconds', () => {

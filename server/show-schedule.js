@@ -105,8 +105,10 @@ export function offMessage(config) {
 
 // A late tick sends the frames it skipped, in order, each followed by its cues, so
 // receivers still see every index. A longer gap (machine sleep) jumps instead of
-// flooding, and the cues it jumped over fire once.
+// flooding, and the cues it jumped over fire once. The limit is half a second of the
+// show: 30 frames at 60/s, 500 at 1000/s, where every tick carries about 17 (show-runner.js).
 export const MAX_FILL_FRAMES = 30;
+export const fillFrames = config => Math.max(MAX_FILL_FRAMES, Math.ceil(config.fps / 2));
 
 // One clock tick: the OSC messages that carry the show from `prev` (last tick's
 // { pass, phase, index }, null on the first tick after START) to now.
@@ -124,7 +126,7 @@ export function step(prev, config, elapsedMs, cues = cueFrames(config)) {
     };
     // /index for every frame in (after, upTo], each followed by the cues on that frame.
     const sendFrames = (after, upTo) => {
-        const first = Math.max(after + 1, upTo - MAX_FILL_FRAMES + 1);
+        const first = Math.max(after + 1, upTo - fillFrames(config) + 1);
         fireCues(after, first - 1);
         for (let frame = first; frame <= upTo; frame++) {
             send(config.indexAddress, frame);

@@ -200,6 +200,12 @@ The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for 
 - **Input Port** — UDP port the bridge listens on for incoming OSC (default `3333`).
 - **Output Port** — default UDP port used for outgoing OSC (`1234`, EoC-biomes' port).
 - **Output IP(s)** — one or more destination IPs, comma-separated, to stream to multiple computers at once: `192.168.1.5, 192.168.1.6:3334`. Append `:port` to a specific IP to override the shared Output Port for just that destination.
+- **Monitor IP(s)** — optional listeners beside the show, in the same form (e.g. `127.0.0.1:3334` for Kybyria). A monitor gets everything the outputs get. During a show it also gets what the outputs never do:
+  - `/x1`, `/y1` … `/x5`, `/y5`: the five most recently fired neurons' own positions, as local playback sends them (needs `data/`; follows the X/Y toggle and prefixes);
+  - `/feature/rate` (spikes in the last 100 ms) and `/feature/burst` (1 on the tick a burst ends, else 0), each tick (needs `data/`);
+  - every incoming `/routing/*` message, relayed as it came (the arms' readings).
+
+  An address that is also an output, or the bridge's own input port, is ignored as a monitor. Without `data/` a monitor gets the index and cues only, and the bridge's log says so.
 
 Settings are saved in the browser and restored on reload.
 
@@ -237,13 +243,13 @@ Runs the EoC-biomes installation by itself: the **SHOW** panel (top of the views
 - `/index` is data milliseconds = the EoC firing-blob frame. A pass is locked to the wall clock: exactly 50:00; a late tick sends the frames it skipped, so receivers see every index.
 - Every message goes to every Output IP — e.g. `192.168.1.5:1234, 192.168.1.7:9000` sends the show to EoC and to the audio Mac mini.
 - The Arduino LED matrices follow the show's playhead. With `data/` set up (below) the bridge drives them itself, so they keep going with the tab hidden, reloaded or closed (HUD `LED BRIDGE`); without it the open tab drives them (`LED TAB`). The SOUND clicks always come from the tab. The show sends no LED frames during OFF or before a pass's first spike (the recording is silent for its first 686 ms, ~11 s of show time); after 0.5 s without frames the `DualLED_Currents` sketch shows its bright white idle shimmer.
-- Range, index rate, off time, fade and reset counts are editable while stopped.
+- Range, off time, fade and reset counts are editable while stopped. The index rate is the play panel's: the show runs at the speed **Target Playback Duration** gives local playback, so 180 s (the default, 1x) is 1000 indices a second and a 3-minute pass. Set it to 3000 s for the installation's 60/s, 50-minute pass. Faster than 1x is capped at 1x.
 - While the show runs, local playback, scrubbing and `/row` input are locked; the bridge is the only `/index` sender. The other views follow the show's playhead.
 - HUD: `PASS 3 · ▶ ON · IDX 091204 / 179999 · OFF IN 24:47 · → 192.168.1.5:1234` — check the destination before starting.
 - Restarting the bridge stops the show; press START SHOW again.
 - Reloading the tab keeps the show running (the bridge owns it); the page reloads `data/` by itself and picks up the current playhead. Uploaded CSVs (no `data/`) are lost on reload and must be loaded again.
 - The bridges only accept WebSocket connections from this machine's pages (loopback + Origin check).
-- `node scripts/show-smoke.mjs` (with no bridges running) checks the whole loop end to end against a local OSC listener and a fake serial bridge.
+- `node scripts/show-smoke.mjs` checks the whole loop end to end against a local OSC listener, a monitor and a fake serial bridge. It uses its own ports, so running bridges can stay up.
 
 **Show data (`data/`)** — point the app at the recording once, so neither the bridge nor a reloaded tab needs an upload:
 

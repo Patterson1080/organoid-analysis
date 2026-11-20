@@ -3,10 +3,14 @@ import { normalizeConfig, cueFrames, timing, step, offMessage } from './show-sch
 // Runs the show schedule in real time. Ticks are aimed at absolute frame deadlines
 // (t0 + n / fps) so timer jitter never accumulates; the index itself comes from elapsed
 // time and step() sends any frames a late tick skipped (show-schedule.js), so lateness
-// never becomes drift or a gap.
+// never becomes drift or a gap. Above MAX_TICK_HZ indices a second the clock still ticks at
+// MAX_TICK_HZ and each tick sends the indices since the last: state goes to the page, the LEDs
+// and the monitors once a tick, and 1000 of those a second would swamp them.
 //   send(address, args) — deliver one OSC message to every destination
 //   onState(state)      — publish state, after every tick
 // now / setTimer / clearTimer are injectable so tests can drive a fake clock.
+export const MAX_TICK_HZ = 60;
+
 export function createShowRunner({
     send,
     onState,
@@ -19,7 +23,7 @@ export function createShowRunner({
     let running = false;
     let timer = null;
     let t0 = 0;
-    let frame = 0;      // deadline counter: the next tick is due at t0 + frame / fps
+    let frame = 0;      // deadline counter: the next tick is due at t0 + frame / min(fps, MAX_TICK_HZ)
     let prev = null;    // step() position of the last tick
     let current = null; // stateAt() of the last tick
 
@@ -42,8 +46,9 @@ export function createShowRunner({
         onState(getState());
         // Next frame boundary that is still ahead (skips ahead when this tick ran late).
         // Multiply by fps rather than divide by the period: 100 / (1000 / 60) is 5.999….
-        frame = Math.max(frame + 1, Math.floor(((now() - t0) * config.fps) / 1000) + 1);
-        timer = setTimer(tick, Math.max(0, t0 + (frame * 1000) / config.fps - now()));
+        const hz = Math.min(config.fps, MAX_TICK_HZ);
+        frame = Math.max(frame + 1, Math.floor(((now() - t0) * hz) / 1000) + 1);
+        timer = setTimer(tick, Math.max(0, t0 + (frame * 1000) / hz - now()));
     }
 
     function start(partial) {

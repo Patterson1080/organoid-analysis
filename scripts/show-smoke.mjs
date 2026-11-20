@@ -1,12 +1,14 @@
-// End-to-end check of show mode through a real bridge process. Not part of `npm test`
-// (it binds the bridges' fixed ports 8080/8081/3333). Stop any running bridges first, then:
+// End-to-end check of show mode through a real bridge process. Not part of `npm test` (it binds
+// ports and takes a few seconds). It runs on its own ports, so working bridges can stay up:
 //   node scripts/show-smoke.mjs
 // Spawns server/osc-bridge.js, points it at a local OSC listener, runs a 1 s pass + 1 s
 // off, simulates a tab reload mid-show (initial CONFIG with defaults), a stray local
 // OSC_BUNDLE and a second START, then STOPs. Also checks that a cross-site page is
 // refused, an out-of-range port is dropped, inbound OSC reaches tabs as { address, args },
 // data/ is served to local pages only, and the bridge lights the LEDs itself (a fake serial
-// bridge on 8081 counts its frames). Exits 1 on any mismatch.
+// bridge counts its frames). A monitor (server/monitor.js) must get the show's messages plus the
+// positions, the features and the relayed /routing/*, and the show's destination none of those.
+// Exits 1 on any mismatch.
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { mkdtemp, writeFile } from 'node:fs/promises';
@@ -16,8 +18,14 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { Client, Server } from 'node-osc';
 
 const OSC_PORT = 39124;
+const MONITOR_PORT = 39125;
+const WS_PORT = 38080;
+const SERIAL_PORT = 38081;
+const OSC_IN_PORT = 33333;
+const WS_URL = `ws://127.0.0.1:${WS_PORT}`;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const received = [];
+const monitored = [];
 let bridge;
 
 function fail(msg) {
@@ -32,7 +40,7 @@ async function connect() {
     for (let i = 0; i < 20; i++) {
         try {
             return await new Promise((resolve, reject) => {
-                const ws = new WebSocket('ws://127.0.0.1:8080');
+                const ws = new WebSocket(WS_URL);
                 ws.inbox = [];
                 ws.on('message', raw => ws.inbox.push(JSON.parse(raw)));
                 ws.once('open', () => resolve(ws));
@@ -42,7 +50,7 @@ async function connect() {
             await sleep(150);
         }
     }
-    fail('could not connect to the bridge on ws://127.0.0.1:8080');
+    fail(`could not connect to the bridge on ${WS_URL}`);
 }
 
 // Takes the oldest unread message of `type` (waits up to 3 s for one).
@@ -58,7 +66,7 @@ async function next(ws, type) {
 // GET from the bridge's HTTP side with a given Origin → { status, origin header, body }.
 const get = (urlPath, origin, host) => new Promise((resolve, reject) => {
     const headers = { ...(origin && { Origin: origin }), ...(host && { Host: host }) };
-    http.get({ host: '127.0.0.1', port: 8080, path: urlPath, headers }, res => {
+    http.get({ host: '127.0.0.1', port: WS_PORT, path: urlPath, headers }, res => {
         let body = '';
         res.on('data', d => { body += d; });
         res.on('end', () => resolve({ status: res.statusCode, allow: res.headers['access-control-allow-origin'], body }));
@@ -74,7 +82,7 @@ const matrixRows = Array.from({ length: 60 }, (_, ms) => Array.from({ length: 8 
 await writeFile(path.join(dataDir, 'spikes.csv'), Array.from({ length: 8 }, (_, c) => `t_spk_mat_${c}`).join(',') + '\n' + matrixRows.join('\n') + '\n');
 
 const ledFrames = [];
-const serial = new WebSocketServer({ host: '127.0.0.1', port: 8081 });
+const serial = new WebSocketServer({ host: '127.0.0.1', port: SERIAL_PORT });
 serial.on('connection', ws => ws.on('message', raw => {
     const m = JSON.parse(raw);
     if (m.type === 'SERIAL_SYNC') ledFrames.push(m.payload);
@@ -82,12 +90,14 @@ serial.on('connection', ws => ws.on('message', raw => {
 
 const osc = await new Promise(resolve => { const s = new Server(OSC_PORT, '127.0.0.1', () => resolve(s)); });
 osc.on('message', ([address, ...args]) => received.push({ address, args, at: performance.now() }));
+const monitor = await new Promise(resolve => { const s = new Server(MONITOR_PORT, '127.0.0.1', () => resolve(s)); });
+monitor.on('message', ([address, ...args]) => monitored.push({ address, args }));
 
 bridge = spawn(process.execPath, ['server/osc-bridge.js'], {
     stdio: ['ignore', 'ignore', 'inherit'],
-    env: { ...process.env, ORGANOID_DATA_DIR: dataDir },
+    env: { ...process.env, ORGANOID_DATA_DIR: dataDir, ORGANOID_WS_PORT: String(WS_PORT), ORGANOID_SERIAL_WS_URL: `ws://127.0.0.1:${SERIAL_PORT}`, ORGANOID_OSC_IN_PORT: String(OSC_IN_PORT) },
 });
-bridge.on('exit', code => { if (code) fail(`bridge exited with ${code} (ports 8080/3333 busy?)`); });
+bridge.on('exit', code => { if (code) fail(`bridge exited with ${code} (ports ${WS_PORT}/${OSC_IN_PORT} busy?)`); });
 
 const tab = await connect();
 const first = await next(tab, 'SHOW_STATE');
@@ -101,7 +111,7 @@ if (status.status !== 200 || status.allow !== 'http://localhost:5173' || status.
 }
 if ((await get('/data/neurons.csv', 'http://localhost:5173')).body !== neuronsCsv) fail('neurons.csv not served as-is');
 if ((await get('/data/spikes.csv', 'https://evil.example')).status !== 403) fail('data served to a cross-site page');
-if ((await get('/data/spikes.csv', undefined, 'evil.example:8080')).status !== 403) fail('data served to a rebound host name');
+if ((await get('/data/spikes.csv', undefined, `evil.example:${WS_PORT}`)).status !== 403) fail('data served to a rebound host name');
 
 // The bridge has loaded data/ and linked the serial bridge: it drives the LEDs.
 let leds = first.leds;
@@ -113,7 +123,7 @@ if (!leds) fail('bridge never reported leds (data/ load or serial link failed)')
 
 // A page from another site must not get in (cross-site WebSocket hijacking).
 const refused = await new Promise(resolve => {
-    const evil = new WebSocket('ws://127.0.0.1:8080', { origin: 'https://evil.example' });
+    const evil = new WebSocket(WS_URL, { origin: 'https://evil.example' });
     evil.once('open', () => { evil.close(); resolve(false); });
     evil.once('error', () => resolve(true));
     evil.once('unexpected-response', () => resolve(true));
@@ -127,11 +137,16 @@ if ((await next(tab, 'SHOW_STATE')).destinations.length !== 0) fail('out-of-rang
 tab.send(JSON.stringify({ type: 'CONFIG', payload: { oscOutIp: '127.0.0.1', oscOutPort: OSC_PORT } }));
 if ((await next(tab, 'SHOW_STATE')).destinations.join() !== `127.0.0.1:${OSC_PORT}`) fail('CONFIG did not re-point destinations');
 
+// A monitor is kept; a show output and the bridge's own OSC input listed as monitors are not.
+tab.send(JSON.stringify({ type: 'CONFIG', payload: { oscMonitorIp: `127.0.0.1:${MONITOR_PORT}, 127.0.0.1:${OSC_PORT}, 127.0.0.1:${OSC_IN_PORT}` } }));
+const withMonitor = await next(tab, 'SHOW_STATE');
+if (withMonitor.monitors.join() !== `127.0.0.1:${MONITOR_PORT}`) fail(`monitors ${withMonitor.monitors}`);
+if (withMonitor.destinations.join() !== `127.0.0.1:${OSC_PORT}`) fail('setting a monitor changed the destinations');
+
 // Inbound OSC reaches tabs as { address, args } (the OSC Bridge panel reads both).
-const inbound = new Client('127.0.0.1', 3333);
+const inbound = new Client('127.0.0.1', OSC_IN_PORT);
 inbound.send('/row', 42);
 const oscMsg = await next(tab, 'OSC_MSG');
-inbound.close();
 if (oscMsg.address !== '/row' || oscMsg.args[0] !== 42) fail(`OSC_MSG payload ${JSON.stringify(oscMsg)}`);
 
 tab.send(JSON.stringify({ type: 'SHOW_START', payload: { config: { endIndex: 59, offSeconds: 1, fadeSeconds: 1 } } }));
@@ -140,6 +155,7 @@ await sleep(400);
 // Tab reload mid-show: the new tab pushes default settings as its initial CONFIG.
 const reloaded = await connect();
 reloaded.send(JSON.stringify({ type: 'CONFIG', initial: true, payload: { oscOutIp: '127.0.0.1', oscOutPort: 1234 } }));
+inbound.send('/routing/robot/1/proximity', 42.5); // an arm reports mid-show
 const rs = await next(reloaded, 'SHOW_STATE');
 if (!rs.running || rs.phase !== 'on') fail('reloaded tab did not receive the running state');
 if ((await next(reloaded, 'OSC_CONFIG')).oscOutPort !== OSC_PORT) fail('bridge did not hand back its live OSC config');
@@ -153,7 +169,9 @@ tab.send(JSON.stringify({ type: 'SHOW_STOP' }));
 await sleep(200);
 tab.close();
 reloaded.close();
+inbound.close();
 osc.close();
+monitor.close();
 serial.close();
 bridge.kill();
 
@@ -170,5 +188,23 @@ if (passMs < 950 || passMs > 1150) fail(`pass took ${passMs.toFixed(0)} ms`);
 // One LED frame per tick (a late tick covers several ms), so fewer than 60 under load.
 if (ledFrames.length < 30) fail(`bridge sent ${ledFrames.length} LED frames during the pass`);
 if (!ledFrames.some(f => f.isBurst && f.firings.length >= 8)) fail('the 8-neuron burst at 30 ms never lit');
+// The show's destination gets the show and nothing else; the monitor gets the show and the extras.
+const extra = received.find(m => !['/index', '/sim_resetSimsOnly', '/sim_on', '/sim_off', '/sim_resetTermites', '/sim_resetPhysarum'].includes(m.address));
+if (extra) fail(`the show destination got ${extra.address}`);
+const heard = a => monitored.filter(m => m.address === a);
+const monitorIndices = heard('/index').map(m => m.args[0]);
+if (monitorIndices.join() !== indices.join()) fail(`the monitor heard ${monitorIndices.length} /index, the destination ${indices.length}`);
+for (const a of ['/sim_on', '/sim_off', '/sim_resetTermites']) if (heard(a).length !== count(a)) fail(`the monitor heard ${heard(a).length} ${a}`);
+// The neurons' own positions (x + y = 7 in this dataset), not 0–15 LED cells; five in the trail.
+const xs = heard('/x1'), ys = heard('/y1');
+if (xs.length < 30 || xs.length !== ys.length || xs.some((m, i) => m.args[0] + ys[i].args[0] !== 7)) fail(`positions: ${xs.length} /x1, ${ys.length} /y1`);
+if (heard('/x5').length < 25 || heard('/x6').length !== 0) fail('the trail should send /x1 to /x5');
+const rates = heard('/feature/rate').map(m => m.args[0]);
+if (rates.length < 30 || rates.at(-1) !== 67 || heard('/feature/burst').length !== rates.length) fail(`features: ${rates.length} rates, last ${rates.at(-1)}`);
+const arm = heard('/routing/robot/1/proximity');
+if (arm.length !== 1 || arm[0].args[0] !== 42.5) fail(`relayed arm reading ${JSON.stringify(arm)}`);
+if (heard('/row').length !== 0) fail('inbound /row was relayed to the monitor');
+
 console.log(`OK: ${indices.length} /index, 15 resets, 1 /sim_on, 2 /sim_off, pass ${passMs.toFixed(0)} ms, reload-safe, cross-site refused, ` +
-    `bad port dropped, inbound OSC shaped, data/ served locally, ${ledFrames.length} LED frames from the bridge`);
+    `bad port dropped, inbound OSC shaped, data/ served locally, ${ledFrames.length} LED frames from the bridge, ` +
+    `monitor heard the show + ${xs.length} positions, ${rates.length} rates and the arm, the destination none of them`);

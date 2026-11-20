@@ -21,6 +21,14 @@ export function extrapolateIndex(state: ShowState, msSinceReceived: number): num
     return Math.min(state.config.endIndex, state.index + (Math.max(0, msSinceReceived) * state.config.fps) / 1000);
 }
 
+/** The show's index rate from the play panel: the range in ms over Target Playback Duration,
+ *  so 180 s of data in 180 s is 1000 indices a second (1x). No duration means 1x. Kept within
+ *  the bridge's limits (server/show-schedule.js). */
+export function playRate(rangeMs: number, targetSeconds: number): number {
+    const rate = targetSeconds > 0 && rangeMs > 0 ? rangeMs / targetSeconds : 1000;
+    return Math.min(1000, Math.max(1, Math.round(rate * 100) / 100));
+}
+
 /** m:ss, rounded up so a countdown reads 0:00 exactly at the switch. */
 export function formatClock(ms: number): string {
     const total = Math.max(0, Math.ceil(ms / 1000));

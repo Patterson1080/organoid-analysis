@@ -38,6 +38,14 @@ export async function loadSpikeFrames(file) {
     return { frameCount: offsets.length - 1, offsets: Int32Array.from(offsets), ids: Uint16Array.from(ids) };
 }
 
+// Spikes in frames (index − windowMs, index], clipped to the recording: the population rate
+// (src/show/routing/soundFeatures.ts counts the same window on the page's spike list).
+export function spikesInWindow({ frameCount, offsets }, index, windowMs = 100) {
+    const to = Math.min(frameCount - 1, Math.floor(index));
+    const from = Math.max(0, Math.floor(index) - windowMs + 1);
+    return to < from ? 0 : offsets[to + 1] - offsets[from];
+}
+
 // Neuron ids that fired in frames (after, upTo], clipped to the recording.
 export function spikeIdsBetween({ frameCount, offsets, ids }, after, upTo) {
     const from = Math.max(0, Math.floor(after) + 1);

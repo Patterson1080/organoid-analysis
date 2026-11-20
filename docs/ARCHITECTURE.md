@@ -37,7 +37,8 @@ ShowPanel ──SHOW_START{config} / SHOW_STOP──▶ osc-bridge.js ──UDP�
 - `server/show-runner.js` — ticks `step()` on absolute deadlines (`t0 + n/fps`), publishes state; injectable clock for tests.
 - `server/show-data.js` — loads `data/` for the bridge: neuron positions (`src/utils/neuronRows.ts`, shared with the page's uploader) and the spike matrix streamed into neuron ids per ms (first 131 columns, as the page reads it).
 - `src/show/ledFrame.ts` — the LED frame (recent-5 trail, burst when > 5 neurons fire at once, 0–15 grid cells, ≤ 30 ms of data per tick). Imported by the page and by the bridge (Node strips the TypeScript types natively), so both light the LEDs the same way. During the show the bridge sends it to the serial bridge when it has `data/` (`SHOW_STATE.leds`); the page then sends none.
-- `osc-bridge.js` — wires the runner to every OSC destination; drops `OSC_BUNDLE`/`OSC_SEND` while the show runs; broadcasts `SHOW_STATE` every tick and to each new tab; ignores a reconnecting tab's initial `CONFIG` mid-show and replies `OSC_CONFIG`.
+- `server/monitor.js` — monitors: listeners beside the show (`oscMonitorIp`, e.g. Kybyria). Pure: the destination parser, which monitors may be sent to (not an output, not the bridge's own input), the trail's `/x`·`/y` messages, and the rate and burst-end tracker (`soundFeatures.ts`'s rule on the bridge's frames). The outputs never get these extras.
+- `osc-bridge.js` — wires the runner to every OSC destination and monitor; each tick sends the monitors the positions and features from `data/`, and relays inbound `/routing/*` to them; drops `OSC_BUNDLE`/`OSC_SEND` while the show runs; broadcasts `SHOW_STATE` every tick and to each new tab; ignores a reconnecting tab's initial `CONFIG` mid-show and replies `OSC_CONFIG`.
 - `src/components/ShowPanel.tsx` — HUD, firing overview + cue ticks, cycle bar, ±1 s raster; draws from a ref in its own rAF loop, extrapolating the index between messages (`src/show/showMath.ts`). The routing view sits below it (next section).
 - `App.tsx` — mirrors `SHOW_STATE` into the playhead for the other views and feeds the spikes since the last message to `emitFrameOutputs` (sound, recent-neuron trail, and LED serial unless the bridge drives it); loads `data/` from the bridge on connect; locks local transport and gestures; persists OSC settings (`src/utils/oscSettings.ts`).
 
@@ -109,4 +110,4 @@ Drawing lives in `src/components/routing/`:
 
 ## Tests
 
-`npm test` — `node --test` over `server/**/*.test.js` and `src/**/*.test.ts` (Node's native type stripping; test files are excluded from `tsc`). `scripts/show-smoke.mjs` — end-to-end through a spawned bridge.
+`npm test` — `node --test` over `server/**/*.test.js` and `src/**/*.test.ts` (Node's native type stripping; test files are excluded from `tsc`). `scripts/show-smoke.mjs` — end-to-end through a spawned bridge on its own ports (`ORGANOID_WS_PORT`, `ORGANOID_SERIAL_WS_URL`, `ORGANOID_OSC_IN_PORT`), with a monitor.

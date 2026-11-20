@@ -16,7 +16,7 @@ import { PresentationTile } from './components/PresentationTile';
 
 import { Neuron, ShowConfig, ShowState, SpikeEvent } from './types';
 import { loadOscSettings, saveOscSettings } from './utils/oscSettings';
-import { spikesBetween } from './show/showMath';
+import { playRate, spikesBetween } from './show/showMath';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from './show/ledFrame';
 import { parseFiringBlob } from './show/routing/firingBlob';
 import { queueLedFrame } from './show/routing/live';
@@ -104,6 +104,7 @@ function App() {
     const [oscInPort, setOscInPort] = useState(savedOsc.oscInPort);
     const [oscOutIp, setOscOutIp] = useState(savedOsc.oscOutIp);
     const [oscOutPort, setOscOutPort] = useState(savedOsc.oscOutPort);
+    const [oscMonitorIp, setOscMonitorIp] = useState(savedOsc.oscMonitorIp);
 
     // OSC Output message config (addresses + enable toggles).
     const [oscTimeEnabled, setOscTimeEnabled] = useState(savedOsc.oscTimeEnabled);
@@ -123,7 +124,7 @@ function App() {
     // Sound State
     const [soundEnabled, setSoundEnabled] = useState(false);
     const [isTransparent, setIsTransparent] = useState(false); // Transparent background for Spout/OBS
-    const [targetDuration, setTargetDuration] = useState(10); // Target playback duration in seconds
+    const [targetDuration, setTargetDuration] = useState(180); // Target playback duration in seconds: 1x for the 180 s recording
     const [burstThreshold, setBurstThreshold] = useState(20); // Min neurons for burst
     const [trailLength, setTrailLength] = useState(5); // Number of neurons in trail
     const [neuralCurvesEnabled, setNeuralCurvesEnabled] = useState(false); // Eciton burchellii style curves
@@ -225,10 +226,11 @@ function App() {
     }, []);
 
     // Mid-show reconnect: the bridge kept its own OSC settings; mirror them in the panel.
-    const handleOscConfig = useCallback((c: { oscInPort: number; oscOutPort: number; oscOutIp: string; osc?: Record<string, unknown> }) => {
+    const handleOscConfig = useCallback((c: { oscInPort: number; oscOutPort: number; oscOutIp: string; oscMonitorIp?: string; osc?: Record<string, unknown> }) => {
         setOscInPort(String(c.oscInPort));
         setOscOutPort(String(c.oscOutPort));
         setOscOutIp(String(c.oscOutIp));
+        if (typeof c.oscMonitorIp === 'string') setOscMonitorIp(c.oscMonitorIp);
         const o = c.osc ?? {};
         if (typeof o.timeEnabled === 'boolean') setOscTimeEnabled(o.timeEnabled);
         if (typeof o.timeAddress === 'string') setOscTimeAddress(o.timeAddress);
@@ -245,6 +247,7 @@ function App() {
         oscInPort: parseInt(oscInPort),
         oscOutPort: parseInt(oscOutPort),
         oscOutIp,
+        oscMonitorIp,
         osc: {
             timeEnabled: oscTimeEnabled,
             timeAddress: oscTimeAddress,
@@ -254,7 +257,7 @@ function App() {
             rowEnabled: oscRowEnabled,
             rowAddress: oscRowAddress,
         },
-    }), [oscInPort, oscOutPort, oscOutIp, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress]);
+    }), [oscInPort, oscOutPort, oscOutIp, oscMonitorIp, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress]);
 
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -437,8 +440,8 @@ function App() {
     }, [getOscConfigPayload]);
 
     useEffect(() => {
-        saveOscSettings({ oscInPort, oscOutIp, oscOutPort, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress });
-    }, [oscInPort, oscOutIp, oscOutPort, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress]);
+        saveOscSettings({ oscInPort, oscOutIp, oscOutPort, oscMonitorIp, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress });
+    }, [oscInPort, oscOutIp, oscOutPort, oscMonitorIp, oscTimeEnabled, oscTimeAddress, oscNeuronsEnabled, oscXPrefix, oscYPrefix, oscRowEnabled, oscRowAddress]);
 
     // One /index sender: local playback stays off while the show runs (covers PLAY,
     // spacebar, center tap, scrub release and /row input in one place).
@@ -1346,6 +1349,20 @@ function App() {
                                 />
                             </div>
 
+                            <div className="flex flex-col">
+                                <label className="data-label">Monitor IP(s)</label>
+                                <input
+                                    type="text"
+                                    value={oscMonitorIp}
+                                    onChange={e => setOscMonitorIp(e.target.value)}
+                                    placeholder="127.0.0.1:3334"
+                                    style={{ width: '100%', padding: '8px', background: '#111', border: '1px solid #333', color: '#fff' }}
+                                />
+                                <div style={{ fontSize: '0.75em', color: '#888', marginTop: '4px' }}>
+                                    Listeners beside the show. They get what the outputs get and, during a show, the recent neurons' positions, /feature/rate, /feature/burst and the arms' /routing/* readings. The outputs never get these extras.
+                                </div>
+                            </div>
+
                             <div className="flex flex-col gap-sm">
                                 <label className="data-label">Output Messages</label>
                                 <div style={{ fontSize: '0.75em', color: '#888', marginBottom: '4px' }}>
@@ -1453,6 +1470,7 @@ function App() {
                                 showState={showState}
                                 latestRef={showLatestRef}
                                 connected={wsConnected}
+                                playRate={playRate(endTime - startTime, targetDuration)}
                                 onStart={config => sendShow({ type: 'SHOW_START', payload: { config } })}
                                 onStop={() => sendShow({ type: 'SHOW_STOP' })}
                                 presentation={presentation}

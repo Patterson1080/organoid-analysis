@@ -1,4 +1,5 @@
 import http from 'node:http';
+import os from 'node:os';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { pipeline } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -9,13 +10,16 @@ import { isLocalHost, isLocalOrigin } from './local-origin.js';
 import { dataRoutes, dataStatus } from './data-files.js';
 import { loadNeurons, loadSpikeFrames, spikeIdsBetween } from './show-data.js';
 import { ledStep, neuronBounds, neuronsById, showOutputAfter } from '../src/show/ledFrame.ts';
+import { createFeatureTracker, monitorsApartFrom, parseDestinations, positionMessages } from './monitor.js';
 
 // Default Configuration
-const DEFAULT_OSC_IN_PORT = 3333;
+// The three ports are fixed for the page; the smoke test moves them (scripts/show-smoke.mjs)
+// so it can run beside working bridges.
+const DEFAULT_OSC_IN_PORT = Number(process.env.ORGANOID_OSC_IN_PORT) || 3333;
 const DEFAULT_OSC_OUT_PORT = 1234; // EoC-biomes OSCMapping port in the show scenes
 const DEFAULT_OSC_OUT_IP = '127.0.0.1';
-const WS_PORT = 8080;
-const SERIAL_WS_URL = 'ws://127.0.0.1:8081';
+const WS_PORT = Number(process.env.ORGANOID_WS_PORT) || 8080;
+const SERIAL_WS_URL = process.env.ORGANOID_SERIAL_WS_URL || 'ws://127.0.0.1:8081';
 
 // The show dataset in data/ (usually symlinks to the real files, see data-files.js): served to
 // the page, and the CSVs are read here to drive the LEDs. ORGANOID_DATA_DIR overrides (tests).
@@ -28,11 +32,16 @@ const SPIKES_CSV = DATA_ROUTES.get('/data/spikes.csv').path;
 let oscServer;
 let oscClients = []; // One OSC Client per destination
 let oscDestinations = []; // { ip, port } of each client, for the show HUD
+// Monitors (monitor.js) listen without being part of the show: they get what the destinations
+// get, plus the recent neurons' positions, the rate and burst ends, and /routing/* relayed.
+let monitorClients = [];
+let monitorDestinations = [];
+let oscMonitorIp = '';
 let wsServer;
 let oscInPort = DEFAULT_OSC_IN_PORT;
 let oscOutPort = DEFAULT_OSC_OUT_PORT;
 let oscOutIp = DEFAULT_OSC_OUT_IP;
-let showData = null;      // { neuronById, bounds, frames } once data/ has loaded
+let showData = null;      // { neuronById, bounds, frames, features } once data/ has loaded
 let serialLink = null;    // WebSocket to the serial bridge while connected
 let ledTrail = [];
 let lastLedIndex = null;
@@ -51,12 +60,13 @@ let oscOut = {
 
 // Show mode: the bridge owns the show clock (show-runner.js), so a reloaded or
 // backgrounded tab can't stall /index. Sends go to whichever oscClients are current.
-// Every tick also drives the LED matrices from data/ (no browser needed) and sends
-// SHOW_STATE (60 Hz, localhost), from which the page follows the playhead and plays sound.
+// Every tick also drives the LED matrices from data/ (no browser needed), sends the monitors
+// their extras, and sends SHOW_STATE (60 Hz, localhost), from which the page follows the
+// playhead and plays sound.
 const show = createShowRunner({
     send: sendToAll,
     onState: state => {
-        driveLeds(state);
+        driveFromData(state);
         broadcastShowState();
     },
 });
@@ -170,7 +180,10 @@ async function loadShowData() {
     const t0 = Date.now();
     const neurons = await loadNeurons(NEURONS_CSV);
     const frames = await loadSpikeFrames(SPIKES_CSV);
-    showData = { neuronById: neuronsById(neurons), bounds: neuronBounds(neurons) ?? { minX: 0, maxX: 1, minY: 0, maxY: 1 }, frames };
+    showData = {
+        neuronById: neuronsById(neurons), bounds: neuronBounds(neurons) ?? { minX: 0, maxX: 1, minY: 0, maxY: 1 }, frames,
+        features: createFeatureTracker(frames),
+    };
     console.log(`Show data: ${neurons.length} neurons, ${frames.frameCount} frames, ${frames.ids.length} spikes ` +
         `(${((Date.now() - t0) / 1000).toFixed(1)} s) — LEDs driven by the bridge`);
     broadcastShowState();
@@ -194,19 +207,25 @@ function connectSerialLink() {
     ws.on('error', () => {}); // 'close' follows and retries; an unhandled 'error' would throw
 }
 
-// The same LED frames the page sends during local playback (src/show/ledFrame.ts), for the
-// spikes since the previous tick.
-function driveLeds(state) {
+// What a show tick takes from data/, for the spikes since the previous tick: the same LED frames
+// the page sends during local playback (src/show/ledFrame.ts), and for the monitors the recent
+// neurons' own positions, as local playback sends them, with the rate and burst ends.
+function driveFromData(state) {
     if (!showData || !state.running || state.phase !== 'on') {
         lastLedIndex = null;
         return;
     }
+    if (lastLedIndex === null) showData.features.reset(); // a new pass, or the first tick
     const after = showOutputAfter(lastLedIndex, state.index, state.config.startIndex);
     lastLedIndex = state.index;
     if (state.index <= after) return;
     const { trail, frame } = ledStep(ledTrail, spikeIdsBetween(showData.frames, after, state.index), showData.neuronById, showData.bounds);
     ledTrail = trail;
     if (frame && serialLink) serialLink.send(JSON.stringify({ type: 'SERIAL_SYNC', payload: frame }));
+    const features = showData.features.step(after, state.index); // stepped every tick, heard or not
+    if (monitorClients.length === 0) return;
+    const positions = oscOut.neuronsEnabled ? positionMessages(trail, oscOut.xPrefix, oscOut.yPrefix) : [];
+    for (const m of [...positions, ...features]) sendTo(monitorClients, m.address, m.args);
 }
 
 // Initialize OSC Server (Inbound)
@@ -222,7 +241,9 @@ function startOscServer(port) {
             // msg is [address, ...args]; the frontend reads { address, args }.
             // We expect something like ['/row', 123]. /routing/* is the audio computer's
             // telemetry, many messages a second, so it isn't logged.
-            if (!String(msg[0]).startsWith('/routing/')) console.log(`OSC IN: ${msg}`);
+            // The monitors get it relayed as it came.
+            if (String(msg[0]).startsWith('/routing/')) sendTo(monitorClients, msg[0], msg.slice(1));
+            else console.log(`OSC IN: ${msg}`);
             broadcast({ type: 'OSC_MSG', payload: { address: msg[0], args: msg.slice(1) } });
         });
     } catch (e) {
@@ -230,41 +251,26 @@ function startOscServer(port) {
     }
 }
 
-// Parse a destination string into { ip, port } entries.
-// Accepts a comma-separated list; each entry may be "ip" or "ip:port".
-// Entries without a port fall back to the shared defaultPort. Entries whose port is out
-// of UDP range are dropped: dgram throws on send, which would kill the show clock.
-function parseDestinations(ipString, defaultPort) {
-    return String(ipString || '')
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean)
-        .map(entry => {
-            const [ip, port] = entry.split(':');
-            const parsedPort = port ? parseInt(port, 10) : defaultPort;
-            return { ip: ip.trim(), port: Number.isFinite(parsedPort) ? parsedPort : defaultPort };
-        })
-        .filter(({ ip, port }) => {
-            if (Number.isInteger(port) && port > 0 && port < 65536) return true;
-            console.warn(`Ignoring OSC destination ${ip}:${port} (port must be 1-65535)`);
-            return false;
-        });
-}
-
-// Initialize OSC Clients (Outbound) — one per destination
+// Initialize OSC Clients (Outbound) — one per destination, then one per monitor
 function updateOscClients(ipString, port) {
-    oscClients.forEach(c => c.close());
-    oscClients = [];
+    [...oscClients, ...monitorClients].forEach(c => c.close());
 
     oscDestinations = parseDestinations(ipString, port);
-    oscDestinations.forEach(({ ip, port: p }) => {
-        oscClients.push(new Client(ip, p));
+    oscClients = oscDestinations.map(({ ip, port: p }) => {
         console.log(`OSC Client ready to send to ${ip}:${p}`);
+        return new Client(ip, p);
     });
 
     if (oscClients.length === 0) {
         console.warn('No OSC destinations configured');
     }
+
+    const ownAddresses = Object.values(os.networkInterfaces()).flat().map(i => i?.address).filter(Boolean);
+    monitorDestinations = monitorsApartFrom(parseDestinations(oscMonitorIp, port), oscDestinations, oscInPort, ownAddresses);
+    monitorClients = monitorDestinations.map(({ ip, port: p }) => {
+        console.log(`OSC monitor ready at ${ip}:${p}`);
+        return new Client(ip, p);
+    });
 }
 
 function updateOscConfig(config) {
@@ -274,15 +280,19 @@ function updateOscConfig(config) {
     const inPort = config.oscInPort ?? config.inPort;
     const outPort = config.oscOutPort ?? config.outPort;
     const outIp = config.oscOutIp ?? config.outIp;
+    const monitorIp = typeof config.oscMonitorIp === 'string' ? config.oscMonitorIp : oscMonitorIp; // '' clears it
+    const inPortChanged = Boolean(inPort) && inPort !== oscInPort;
 
-    if (inPort && inPort !== oscInPort) {
+    if (inPortChanged) {
         oscInPort = inPort;
         startOscServer(oscInPort);
     }
 
-    if ((outIp && outIp !== oscOutIp) || (outPort && outPort !== oscOutPort)) {
+    // The monitors are checked against the outputs and the input port, so any of them rebuilds both lists.
+    if ((outIp && outIp !== oscOutIp) || (outPort && outPort !== oscOutPort) || monitorIp !== oscMonitorIp || (inPortChanged && oscMonitorIp)) {
         oscOutIp = outIp || oscOutIp;
         oscOutPort = outPort || oscOutPort;
+        oscMonitorIp = monitorIp;
         updateOscClients(oscOutIp, oscOutPort);
     }
 
@@ -298,21 +308,28 @@ function updateOscConfig(config) {
 }
 
 function currentOscConfig() {
-    return { oscInPort, oscOutPort, oscOutIp, osc: { ...oscOut } };
+    return { oscInPort, oscOutPort, oscOutIp, oscMonitorIp, osc: { ...oscOut } };
 }
 
-function sendToAll(address, args) {
-    oscClients.forEach(client => {
+function sendTo(clients, address, args) {
+    clients.forEach(client => {
         client.send(address, ...args, (err) => {
             if (err) console.error('OSC Send Error:', err);
         });
     });
 }
 
+// The show's messages: to every destination, and to the monitors.
+function sendToAll(address, args) {
+    sendTo(oscClients, address, args);
+    sendTo(monitorClients, address, args);
+}
+
 function showStatePayload() {
     return {
         ...show.getState(),
         destinations: oscDestinations.map(d => `${d.ip}:${d.port}`),
+        monitors: monitorDestinations.map(d => `${d.ip}:${d.port}`),
         leds: showData !== null && serialLink !== null,
     };
 }
@@ -322,6 +339,9 @@ function broadcastShowState() {
     const label = payload.running ? `pass ${payload.pass} ${payload.phase}` : 'stopped';
     if (label !== lastShowLog) {
         console.log(`SHOW: ${label}`);
+        if (payload.running && !lastShowLog.startsWith('pass') && monitorClients.length > 0 && !showData) {
+            console.log(`No show data in ${DATA_DIR}: the monitors get the index and cues only, no positions or features`);
+        }
         lastShowLog = label;
     }
     broadcast({ type: 'SHOW_STATE', payload });
@@ -329,27 +349,22 @@ function broadcastShowState() {
 
 function sendOscMessage(value) {
     if (show.isRunning()) return; // the show is the only sender while it runs
-    if (oscClients.length === 0) {
+    if (oscClients.length + monitorClients.length === 0) {
         console.warn('No OSC clients initialized');
         return;
     }
     if (!oscOut.rowEnabled) return;
     // Send as <rowAddress> <value> or <rowAddress> <val1> <val2> ...
-    const args = Array.isArray(value) ? value : [value];
-    oscClients.forEach(client => {
-        client.send(oscOut.rowAddress, ...args, (err) => {
-            if (err) console.error('OSC Send Error:', err);
-        });
-    });
+    sendToAll(oscOut.rowAddress, Array.isArray(value) ? value : [value]);
 }
 
 function sendOscBundle(bundle) {
     if (show.isRunning()) return; // the show is the only /index sender while it runs
-    if (oscClients.length === 0) return;
+    if (oscClients.length + monitorClients.length === 0) return;
 
     console.log('Sending Bundle:', bundle); // Debug Log
 
-    oscClients.forEach(client => {
+    [...oscClients, ...monitorClients].forEach(client => {
         // Send Time (row index)
         if (oscOut.timeEnabled && bundle.time !== undefined) {
             client.send(oscOut.timeAddress, bundle.time);
