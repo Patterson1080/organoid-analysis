@@ -51,16 +51,24 @@ export function loadOscSettings(storage?: KeyValueStore): OscSettings {
 
 const LISTENER_PORT = '3334'; // Kybyria's OSC input
 
-/** Settings saved before monitors existed list a listener as an output, which would send it the
- *  show twice over and none of the monitor signals. With no monitor set, an output on the
- *  listener's port becomes the monitor, and the outputs fall back to the default if none is left. */
+/** A listener saved as a show output (from before monitors existed) would get the show without
+ *  the monitor signals, and the bridge ignores a monitor that is also an output. So an output
+ *  whose port is the listener's, by its own `:port` or by the shared Output Port, becomes a
+ *  monitor; the Output Port goes back to the default, and so do the outputs if none is left. */
 export function listenerAsMonitor(settings: OscSettings): OscSettings {
-    if (settings.oscMonitorIp.trim() !== '') return settings;
-    const entries = settings.oscOutIp.split(',').map(s => s.trim()).filter(Boolean);
-    const listeners = entries.filter(e => e.split(':')[1] === LISTENER_PORT);
-    if (listeners.length === 0) return settings;
-    const outputs = entries.filter(e => !listeners.includes(e));
-    return { ...settings, oscOutIp: outputs.join(', ') || DEFAULT_OSC_SETTINGS.oscOutIp, oscMonitorIp: listeners.join(', ') };
+    const split = (list: string) => list.split(',').map(s => s.trim()).filter(Boolean);
+    const sharedIsListener = settings.oscOutPort.trim() === LISTENER_PORT;
+    const isListener = (entry: string) => (entry.includes(':') ? entry.split(':')[1] === LISTENER_PORT : sharedIsListener);
+    const entries = split(settings.oscOutIp);
+    const listeners = entries.filter(isListener).map(e => `${e.split(':')[0]}:${LISTENER_PORT}`);
+    if (listeners.length === 0 && !sharedIsListener) return settings;
+    const monitors = [...new Set([...split(settings.oscMonitorIp), ...listeners])];
+    return {
+        ...settings,
+        oscOutIp: entries.filter(e => !isListener(e)).join(', ') || DEFAULT_OSC_SETTINGS.oscOutIp,
+        oscOutPort: sharedIsListener ? DEFAULT_OSC_SETTINGS.oscOutPort : settings.oscOutPort,
+        oscMonitorIp: monitors.join(', '),
+    };
 }
 
 export function saveOscSettings(settings: OscSettings, storage?: KeyValueStore): void {

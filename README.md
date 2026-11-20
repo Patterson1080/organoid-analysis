@@ -211,7 +211,7 @@ The application includes a WebSocket-to-OSC bridge (`server/osc-bridge.js`) for 
 
   Local playback sends a monitor the positions and most of the same signals, so a listener can be set up without a show.
 
-  An address that is also an output, or the bridge's own input port, is ignored as a monitor. Settings saved before monitors existed, with a listener on port 3334 among the outputs, are read with that listener as the monitor. Without `data/` a monitor gets the index and cues only, and the bridge's log says so.
+  An address that is also an output, or the bridge's own input port, is ignored as a monitor. A listener on port 3334 saved as an output (or as the shared Output Port) is read as a monitor, and the Output Port goes back to 1234. Without `data/` a monitor gets the index and cues only, and the bridge's log says so.
 
 Settings are saved in the browser and restored on reload.
 
