@@ -120,6 +120,8 @@ for (let i = 0; i < 300 && !leds; i++) {
     leds = tab.inbox.some(m => m.type === 'SHOW_STATE' && m.payload.leds);
 }
 if (!leds) fail('bridge never reported leds (data/ load or serial link failed)');
+// Those states (data loaded, serial linked) are read; the checks below each wait for a new one.
+tab.inbox = tab.inbox.filter(m => m.type !== 'SHOW_STATE');
 
 // A page from another site must not get in (cross-site WebSocket hijacking).
 const refused = await new Promise(resolve => {
@@ -203,7 +205,8 @@ const xs = heard('/x1'), ys = heard('/y1');
 if (xs.length < 30 || xs.length !== ys.length || xs.some((m, i) => m.args[0] + ys[i].args[0] !== 7)) fail(`positions: ${xs.length} /x1, ${ys.length} /y1`);
 if (heard('/x5').length < 25 || heard('/x6').length !== 0) fail('the trail should send /x1 to /x5');
 const rates = heard('/feature/rate').map(m => m.args[0]);
-if (rates.length < 30 || rates.at(-1) !== 67 || heard('/feature/burst').length !== rates.length) fail(`features: ${rates.length} rates, last ${rates.at(-1)}`);
+// 67 spikes by the last index; the pass can end a tick before it, at 66.
+if (rates.length < 30 || rates.at(-1) < 66 || rates.at(-1) > 67 || heard('/feature/burst').length !== rates.length) fail(`features: ${rates.length} rates, last ${rates.at(-1)}`);
 // Every tick: neurons that fired (1 a ms here, all 8 at ms 30); the backbone ones among them
 // (the parser reads this dataset's neuron 1 as backbone); bursting; the LED frame's points.
 const firing = heard('/feature/firing').map(m => m.args[0]);
