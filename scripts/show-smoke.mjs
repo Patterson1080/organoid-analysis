@@ -167,6 +167,9 @@ reloaded.send(JSON.stringify({ type: 'SHOW_START', payload: { config: {} } }));
 await sleep(1200); // through the end of the pass into OFF
 tab.send(JSON.stringify({ type: 'SHOW_STOP' }));
 await sleep(200);
+// Local playback: the page's own monitor signals ride its bundle, to the monitor only.
+tab.send(JSON.stringify({ type: 'OSC_BUNDLE', payload: { neurons: [], monitor: [{ address: '/feature/playback', args: [3] }, { address: 'bad', args: [1] }] } }));
+await sleep(200);
 tab.close();
 reloaded.close();
 inbound.close();
@@ -216,6 +219,7 @@ const passes = heard('/show/pass').map(m => m.args[0]).join();
 if (phases !== 'stopped,on,off,stopped' || passes !== '0,1,1,0') fail(`phases ${phases}, passes ${passes}`);
 const arm = heard('/routing/robot/1/proximity');
 if (arm.length !== 1 || arm[0].args[0] !== 42.5) fail(`relayed arm reading ${JSON.stringify(arm)}`);
+if (heard('/feature/playback').map(m => m.args[0]).join() !== '3' || heard('bad').length !== 0) fail('local playback signals did not reach the monitor as sent');
 if (heard('/row').length !== 0) fail('inbound /row was relayed to the monitor');
 
 console.log(`OK: ${indices.length} /index, 15 resets, 1 /sim_on, 2 /sim_off, pass ${passMs.toFixed(0)} ms, reload-safe, cross-site refused, ` +
