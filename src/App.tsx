@@ -1522,7 +1522,6 @@ function App() {
                                 latestRef={showLatestRef}
                                 connected={wsConnected}
                                 playRate={playRate(endTime - startTime, targetDuration)}
-                                loop={isLooping}
                                 onStart={config => sendShow({ type: 'SHOW_START', payload: { config } })}
                                 onStop={() => sendShow({ type: 'SHOW_STOP' })}
                                 presentation={presentation}

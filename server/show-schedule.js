@@ -2,16 +2,14 @@
 // no sockets — so the whole 52-minute cycle is testable in milliseconds. show-runner.js
 // owns the clock and sends whatever step() returns.
 //
-// One cycle = a pass (index startIndex → endIndex at fps) + offSeconds of silence. With no
-// off time the next pass follows at once; with loop off the show ends after its first pass.
+// One cycle = a pass (index startIndex → endIndex at fps) + offSeconds of silence.
 // Index = data milliseconds = EoC firing-blob frame (180 s recording, 1 frame/ms).
 
 export const DEFAULT_SHOW_CONFIG = Object.freeze({
     startIndex: 0,
     endIndex: 179999,      // inclusive: 180000 frames, the whole EoC blob
     fps: 60,               // 180000 / 60 = 3000 s = 50 min per pass
-    offSeconds: 120,       // dark between passes; the page's form starts at 0 (ShowPanel.tsx)
-    loop: true,            // false: one pass, then the show stops itself
+    offSeconds: 120,
     fadeSeconds: 5,
     indexAddress: '/index',
     passStartCue: '/sim_resetSimsOnly',
@@ -55,7 +53,6 @@ export function normalizeConfig(partial = {}) {
         endIndex,
         fps: fps > 0 ? Math.min(MAX_FPS, fps) : d.fps,
         offSeconds: Math.min(MAX_SECONDS, Math.max(0, toNumber(partial.offSeconds, d.offSeconds))),
-        loop: typeof partial.loop === 'boolean' ? partial.loop : d.loop,
         fadeSeconds: Math.min(MAX_SECONDS, Math.max(0, toNumber(partial.fadeSeconds, d.fadeSeconds))),
         indexAddress: toAddress(partial.indexAddress, d.indexAddress) || d.indexAddress,
         passStartCue: toAddress(partial.passStartCue, d.passStartCue),
@@ -89,10 +86,6 @@ export function cueFrames(config) {
 export function stateAt(config, elapsedMs) {
     const { passMs, cycleMs } = timing(config);
     const elapsed = Math.max(0, elapsedMs);
-    // Without loop the first pass is the show: past its end it is done, and the runner stops it.
-    if (!config.loop && elapsed >= passMs) {
-        return { pass: 1, phase: 'off', index: null, phaseElapsedMs: elapsed - passMs, phaseDurationMs: cycleMs - passMs, done: true };
-    }
     const cycle = Math.floor(elapsed / cycleMs);
     const t = elapsed - cycle * cycleMs;
     if (t < passMs) {
@@ -144,8 +137,7 @@ export function step(prev, config, elapsedMs, cues = cueFrames(config)) {
     const stillInSameOn = prev && prev.pass === now.pass && now.phase === 'on';
     if (prev && prev.phase === 'on' && !stillInSameOn) {
         sendFrames(prev.index, config.endIndex);
-        // A show that is done gets its off cue from the runner's stop, once.
-        if (config.offSeconds > 0 && !now.done) send(config.offAddress, fadeArg(config));
+        if (config.offSeconds > 0) send(config.offAddress, fadeArg(config));
     }
 
     if (now.phase === 'on') {
