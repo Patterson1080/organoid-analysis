@@ -1,0 +1,57 @@
+/* Shared design tokens for organoid-analysis and Kybyria.
+   Source of truth: organoid-analysis. Values are taken from its src/index.css (:root)
+   and its routing view (src/components/routing/, src/show/routing/layout.ts).
+   Kybyria holds a copy at src/design/tokens.css. Change both together. */
+
+:root {
+    /* Surfaces and text: black and monochrome */
+    --color-bg: #050505;
+    --color-surface: #0a0a0a;
+    --color-text-primary: #ffffff;
+    --color-text-secondary: #888888;
+    --color-border: #333333;
+    --color-border-light: #555555;
+    --color-grid: #222222;
+    --color-accent: #ffffff;
+
+    /* Colour is reserved for data */
+    --color-neuron: #00ff41;
+    --color-backbone: #ff3333;
+
+    /* Spacing */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 64px;
+
+    /* Type */
+    --font-family: 'Outfit', 'Helvetica Neue', 'Arial', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'Courier New', monospace;
+    --font-size-xs: 10px;
+    --font-size-sm: 12px;
+    --font-size-md: 14px;
+    --font-size-lg: 18px;
+    --font-size-xl: 32px;
+    --font-size-min: 8px;          /* nothing is drawn smaller */
+    --line-height-text: 1.4;
+    --line-height-canvas: 1.45;
+    --label-tracking: 0.08em;      /* uppercase mono labels */
+
+    /* Lines, as the routing view draws them (px at scale 1) */
+    --line-weight: 1px;
+    --line-weight-path: 1.3px;
+    --line-weight-active: 2px;
+    --line-color-idle: #5c5c5c;
+    --line-color-lit: #bbbbbb;
+    --line-frame: #262626;
+    --dash-flow: 3 11;             /* running path: dashes move while the signal flows */
+    --dash-dotted: 1.5 4.5;        /* asynchronous path: made before the show */
+    --dash-planned: 4 4;           /* planned, dormant or return path */
+
+    /* Signal intensity is white at varying opacity, never a hue */
+    --signal-min-alpha: 0.4;
+    --signal-max-alpha: 1;
+    --state-off-alpha: 0.3;        /* everything dims to this when the system is off */
+}
